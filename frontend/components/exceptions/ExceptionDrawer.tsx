@@ -3,7 +3,7 @@ import { exceptionsApi, actionsApi, aiApi, Exception, AiAnalysis, ChatMessage, C
 import { C } from '../../lib/tokens';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Amount } from '../ui/Amount';
-import { Bot, User, Send, Loader2, Zap, ShieldAlert, X } from 'lucide-react';
+import { Bot, User, Send, Loader2, Zap, ShieldAlert, X, Copy, Check } from 'lucide-react';
 import { PlainText } from '../ui/PlainText';
 
 function Confidence({ value }: { value: number }) {
@@ -43,6 +43,19 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const [copied, setCopied] = useState(false);
+  const handleCopyLink = async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('exception', id);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      prompt('Copy this link:', url.toString());
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -153,9 +166,14 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
               <p className="text-[13px] font-mono" style={{ color: C.textMuted }}>{exc.exceptionId}</p>
             </div>
           ) : <div />}
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 transition-colors">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+          <div className="flex items-center gap-1 ml-4 shrink-0">
+            <button onClick={handleCopyLink} className="p-1 rounded-md hover:bg-gray-100 transition-colors relative" title="Copy link to exception">
+              {copied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5 text-gray-500" />}
+            </button>
+            <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 transition-colors" title="Close">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}

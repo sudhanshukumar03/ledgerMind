@@ -7,6 +7,7 @@ import { Header } from '../../../components/layout/Header';
 import { ExceptionDrawer } from '../../../components/exceptions/ExceptionDrawer';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Amount } from '../../../components/ui/Amount';
+import { Pagination } from '../../../components/ui/Pagination';
 import { C } from '../../../lib/tokens';
 import { Loader2, Search } from 'lucide-react';
 import useSWR from 'swr';
@@ -17,17 +18,46 @@ function ExceptionsList() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeExceptionId = searchParams.get('exception');
+  const pageFilter = parseInt(searchParams.get('page') || '1', 10);
   
-  const [statusFilter, setStatusFilter] = useState('OPEN');
-  const [severityFilter, setSeverityFilter] = useState('');
-  const [search, setSearch] = useState('');
+  const statusFilter = searchParams.get('status') ?? 'OPEN';
+  const severityFilter = searchParams.get('severity') ?? '';
+  const search = searchParams.get('search') ?? '';
 
-  const { data: exceptions = [], isLoading: loading } = useSWR(
-    ['exceptions', statusFilter, severityFilter],
-    () => exceptionsApi.list({ status: statusFilter || undefined, severity: severityFilter || undefined, limit: 50 })
-            .then(r => r.data.data ?? (r.data as any)),
-    { fallbackData: [] }
+  const updateFilters = (updates: { status?: string, severity?: string, search?: string, page?: number }) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (updates.status !== undefined) {
+      if (updates.status) params.set('status', updates.status);
+      else params.delete('status');
+      if (updates.page === undefined) params.set('page', '1');
+    }
+    if (updates.severity !== undefined) {
+      if (updates.severity) params.set('severity', updates.severity);
+      else params.delete('severity');
+      if (updates.page === undefined) params.set('page', '1');
+    }
+    if (updates.search !== undefined) {
+      if (updates.search) params.set('search', updates.search);
+      else params.delete('search');
+      if (updates.page === undefined) params.set('page', '1');
+    }
+    if (updates.page !== undefined) {
+      if (updates.page > 1) params.set('page', updates.page.toString());
+      else params.delete('page');
+    }
+    router.push(`/exceptions?${params.toString()}`);
+  };
+
+  const { data: response, isLoading: loading } = useSWR(
+    ['exceptions', statusFilter, severityFilter, pageFilter],
+    () => exceptionsApi.list({ status: statusFilter || undefined, severity: severityFilter || undefined, limit: 20, page: pageFilter })
+            .then(r => r.data),
+    { fallbackData: { data: [], total: 0, page: 1, limit: 20 } }
   );
+
+  const exceptions = response?.data || [];
+  const total = response?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / 20));
 
   const filtered = exceptions.filter(e =>
     !search ||
@@ -50,7 +80,7 @@ function ExceptionsList() {
               className="w-full pl-9 pr-3 py-2 text-[13px] rounded-md focus:outline-none transition-colors"
               placeholder="Search by ID or type…"
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => updateFilters({ search: e.target.value })}
               style={{ backgroundColor: C.surface, border: `1px solid ${C.border}`, color: C.textPrimary }}
             />
           </div>
@@ -62,7 +92,7 @@ function ExceptionsList() {
             {['', 'OPEN', 'INVESTIGATING', 'RESOLVED'].map(s => (
               <button
                 key={s}
-                onClick={() => setStatusFilter(s)}
+                onClick={() => updateFilters({ status: s })}
                 className="px-4 py-1.5 text-[12px] font-medium transition-colors rounded"
                 style={{ 
                   backgroundColor: statusFilter === s ? C.primary : 'transparent',
@@ -77,7 +107,7 @@ function ExceptionsList() {
           <select
             className="px-3 py-2 text-[13px] rounded-md focus:outline-none shrink-0"
             value={severityFilter}
-            onChange={e => setSeverityFilter(e.target.value)}
+            onChange={e => updateFilters({ severity: e.target.value })}
             style={{ backgroundColor: C.surface, border: `1px solid ${C.border}`, color: C.textPrimary }}
           >
             <option value="">All severities</option>
@@ -131,8 +161,19 @@ function ExceptionsList() {
               </tbody>
             </table>
           </div>
-          <div className="px-4 py-3 border-t text-[12px]" style={{ borderColor: C.border, color: C.textMuted, backgroundColor: C.surface }}>
-            {filtered.length} exception{filtered.length !== 1 ? 's' : ''}
+          <div className="bg-surface">
+            {totalPages > 1 ? (
+              <Pagination 
+                currentPage={pageFilter} 
+                totalPages={totalPages} 
+                onPageChange={(p) => updateFilters({ page: p })} 
+                isLoading={loading} 
+              />
+            ) : (
+              <div className="px-4 py-3 border-t text-[12px]" style={{ borderColor: C.border, color: C.textMuted }}>
+                {filtered.length} exception{filtered.length !== 1 ? 's' : ''}
+              </div>
+            )}
           </div>
         </div>
 
