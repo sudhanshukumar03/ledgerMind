@@ -151,7 +151,7 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
   return (
     <>
       <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-[500px] max-w-[90vw] bg-bg shadow-2xl z-50 flex flex-col animate-slide-left border-l" style={{ borderColor: C.border }}>
+      <div className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-bg shadow-2xl z-50 flex flex-col animate-slide-left border-l" style={{ borderColor: C.border }}>
         
         {/* Header */}
         <div className="shrink-0 px-6 py-5 border-b flex items-start justify-between bg-surface" style={{ borderColor: C.border }}>
@@ -177,18 +177,30 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
         </div>
 
         {/* Tabs */}
-        <div className="flex px-6 border-b bg-surface shrink-0" style={{ borderColor: C.border }}>
+        <div className="flex px-6 py-3 border-b bg-surface shrink-0 gap-2 items-center" style={{ borderColor: C.border }}>
           <button
             onClick={() => setActiveTab('details')}
-            className={`px-4 py-3 text-[13px] font-medium border-b-2 transition-colors ${activeTab === 'details' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            style={activeTab === 'details' ? { borderColor: C.primary, color: C.primary } : {}}
+            className={`px-4 py-1.5 text-[13px] font-medium rounded-full transition-colors`}
+            style={{
+              backgroundColor: activeTab === 'details' ? C.primary : 'transparent',
+              color: activeTab === 'details' ? C.bg : C.textSecondary,
+              borderColor: activeTab === 'details' ? C.primary : 'transparent',
+              borderWidth: '1px',
+              borderStyle: 'solid',
+            }}
           >
             Details & AI Investigation
           </button>
           <button
             onClick={() => setActiveTab('ask_ai')}
-            className={`px-4 py-3 text-[13px] font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'ask_ai' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            style={activeTab === 'ask_ai' ? { borderColor: C.primary, color: C.primary } : {}}
+            className={`px-4 py-1.5 text-[13px] font-medium rounded-full transition-colors flex items-center gap-2`}
+            style={{
+              backgroundColor: activeTab === 'ask_ai' ? C.primary : 'transparent',
+              color: activeTab === 'ask_ai' ? C.bg : C.textSecondary,
+              borderColor: activeTab === 'ask_ai' ? C.primary : 'transparent',
+              borderWidth: '1px',
+              borderStyle: 'solid',
+            }}
           >
             <Bot className="w-4 h-4" /> Ask AI
           </button>

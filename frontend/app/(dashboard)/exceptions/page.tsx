@@ -2,17 +2,17 @@
 
 import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+
 import { exceptionsApi, Exception } from '../../../lib/api-client';
 import { Header } from '../../../components/layout/Header';
 import { ExceptionDrawer } from '../../../components/exceptions/ExceptionDrawer';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Amount } from '../../../components/ui/Amount';
 import { Pagination } from '../../../components/ui/Pagination';
+import { FilterBar } from '../../../components/ui/FilterBar';
 import { C } from '../../../lib/tokens';
 import { Loader2, Search } from 'lucide-react';
 import useSWR from 'swr';
-
-const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 
 function ExceptionsList() {
   const router = useRouter();
@@ -71,7 +71,7 @@ function ExceptionsList() {
 
       <div className="flex-1 overflow-auto p-8 flex flex-col gap-6 max-w-[1200px] w-full mx-auto">
         
-        {/* Filters */}
+        {/* Search */}
         <div className="flex flex-wrap items-center gap-4">
           <div className="relative max-w-xs w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: C.textMuted }} />
@@ -84,36 +84,14 @@ function ExceptionsList() {
               style={{ backgroundColor: C.surface, border: `1px solid ${C.border}`, color: C.textPrimary }}
             />
           </div>
-
-          <div 
-            className="flex rounded-md p-1 shrink-0"
-            style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
-          >
-            {['', 'OPEN', 'INVESTIGATING', 'RESOLVED'].map(s => (
-              <button
-                key={s}
-                onClick={() => updateFilters({ status: s })}
-                className="px-4 py-1.5 text-[12px] font-medium transition-colors rounded"
-                style={{ 
-                  backgroundColor: statusFilter === s ? C.primary : 'transparent',
-                  color: statusFilter === s ? C.bg : C.textSecondary,
-                }}
-              >
-                {s || 'All'}
-              </button>
-            ))}
-          </div>
-
-          <select
-            className="px-3 py-2 text-[13px] rounded-md focus:outline-none shrink-0"
-            value={severityFilter}
-            onChange={e => updateFilters({ severity: e.target.value })}
-            style={{ backgroundColor: C.surface, border: `1px solid ${C.border}`, color: C.textPrimary }}
-          >
-            <option value="">All severities</option>
-            {SEVERITY_ORDER.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
         </div>
+
+        {/* Filters */}
+        <FilterBar 
+          filters={{ status: statusFilter, severity: severityFilter }}
+          onFilterChange={(k, v) => updateFilters({ [k]: v })}
+          onClearAll={() => updateFilters({ status: '', severity: '' })}
+        />
 
         {/* Table */}
         <div className="card flex-1 flex flex-col overflow-hidden">
