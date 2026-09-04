@@ -1,0 +1,531 @@
+// LedgerMind — Prisma schema
+// Implements docs/06-DATABASE-SCHEMA.md with five deliberate amendments:
+//   1. exceptions.dedup_key  — required by doc 10 §12/§14, absent from the doc's table.
+//   2. merchant_id denormalized onto payments / refunds / bank_transactions / actions,
+//      so merchant isolation (doc 11 §4) is a WHERE clause, not a join chain.
+//   3. exception_events.occurred_at — the timeline must order by financial event time,
+//      not row insert time. Without it, doc 07's /timeline endpoint is wrong.
+//   4. ai_analyses.prompt_version + tool_calls — doc 08 §14 requires both for auditability.
+//   5. correlation_id on webhook_events and audit_logs — doc 12 §13.
+//
+// Money is ALWAYS BigInt paise. No Float / Decimal anywhere in this file.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum Role {
+  ADMIN
+  FINANCE
+  VIEWER
+}
+
+enum OrderStatus {
+  CREATED
+  ATTEMPTED
+  PAID
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum RefundStatus {
+  CREATED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum SettlementStatus {
+  CREATED
+  PROCESSED
+  FAILED
+}
+
+enum BankTransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum BankTransactionStatus {
+  PENDING
+  POSTED
+  FAILED
+}
+
+enum WebhookProcessingStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED_DUPLICATE
+}
+
+enum ReconciliationRunStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum MatchEntityType {
+  ORDER
+  PAYMENT
+  REFUND
+  SETTLEMENT
+  BANK_TRANSACTION
+}
+
+enum MatchMethod {
+  EXACT_ID
+  UTR
+  AMOUNT_TIME
+  METADATA
+}
+
+enum ExceptionType {
+  PAYMENT_MISSING
+  ORDER_PAYMENT_MISMATCH
+  BANK_PAYMENT_MISMATCH
+  DUPLICATE_PAYMENT
+  REFUND_MISMATCH
+  REFUND_DELAY
+  SETTLEMENT_MISSING
+  SETTLEMENT_AMOUNT_MISMATCH
+  BANK_MISMATCH
+  UNKNOWN_EXCEPTION
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ExceptionStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  IGNORED
+}
+
+enum ImpactLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ActionType {
+  REFUND
+  CREATE_PAYMENT_LINK
+  MARK_REVIEWED
+  ESCALATE
+}
+
+enum ActionStatus {
+  PROPOSED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXECUTING
+  COMPLETED
+  FAILED
+}
+
+// ============================================================
+// Tenancy
+// ============================================================
+
+model Merchant {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String
+  email             String
+  razorpayAccountId String?  @map("razorpay_account_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users              User[]
+  orders             Order[]
+  payments           Payment[]
+  refunds            Refund[]
+  settlements        Settlement[]
+  bankTransactions   BankTransaction[]
+  reconciliationRuns ReconciliationRun[]
+  exceptions         Exception[]
+  actions            Action[]
+  auditLogs          AuditLog[]
+
+  @@map("merchants")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  merchantId   String   @map("merchant_id") @db.Uuid
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(VIEWER)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  merchant         Merchant   @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  requestedActions Action[]   @relation("ActionRequestedBy")
+  approvedActions  Action[]   @relation("ActionApprovedBy")
+  auditLogs        AuditLog[]
+
+  @@index([merchantId])
+  @@map("users")
+}
+
+// ============================================================
+// Financial entities
+// ============================================================
+
+model Order {
+  id         String      @id @default(uuid()) @db.Uuid
+  orderId    String      @unique @map("order_id") // external (Razorpay) order id
+  merchantId String      @map("merchant_id") @db.Uuid
+  amount     BigInt // paise
+  currency   String      @default("INR") @db.VarChar(3)
+  customerId String?     @map("customer_id")
+  status     OrderStatus @default(CREATED)
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  merchant Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([merchantId, createdAt])
+  @@index([merchantId, status])
+  @@map("orders")
+}
+
+model Payment {
+  id         String        @id @default(uuid()) @db.Uuid
+  paymentId  String        @unique @map("payment_id") // external (Razorpay) payment id
+  merchantId String        @map("merchant_id") @db.Uuid
+  // Nullable on purpose: payment.captured can arrive before order.created.
+  // Doc 09 §9 — the worker must tolerate out-of-order events rather than reject them.
+  orderId    String?       @map("order_id") @db.Uuid
+  amount     BigInt
+  currency   String        @default("INR") @db.VarChar(3)
+  method     String?
+  status     PaymentStatus @default(CREATED)
+  capturedAt DateTime?     @map("captured_at") @db.Timestamptz(6)
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  order    Order?   @relation(fields: [orderId], references: [id])
+  refunds  Refund[]
+
+  @@index([merchantId, createdAt])
+  @@index([orderId])
+  @@index([merchantId, status])
+  @@map("payments")
+}
+
+model Refund {
+  id          String       @id @default(uuid()) @db.Uuid
+  refundId    String       @unique @map("refund_id")
+  merchantId  String       @map("merchant_id") @db.Uuid
+  paymentId   String       @map("payment_id") @db.Uuid
+  amount      BigInt
+  status      RefundStatus @default(CREATED)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  processedAt DateTime?    @map("processed_at") @db.Timestamptz(6)
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  payment  Payment  @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@index([merchantId, status])
+  @@map("refunds")
+}
+
+model Settlement {
+  id             String           @id @default(uuid()) @db.Uuid
+  settlementId   String           @unique @map("settlement_id")
+  merchantId     String           @map("merchant_id") @db.Uuid
+  amount         BigInt
+  settlementDate DateTime         @map("settlement_date") @db.Date
+  status         SettlementStatus @default(CREATED)
+  utr            String?
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  merchant         Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  bankTransactions BankTransaction[]
+
+  @@index([merchantId, settlementDate])
+  @@index([utr])
+  @@map("settlements")
+}
+
+model BankTransaction {
+  id              String                @id @default(uuid()) @db.Uuid
+  bankTxnId       String                @unique @map("bank_txn_id")
+  merchantId      String                @map("merchant_id") @db.Uuid
+  utr             String?
+  amount          BigInt
+  transactionType BankTransactionType   @map("transaction_type")
+  transactionDate DateTime              @map("transaction_date") @db.Date
+  valueAt         DateTime?             @map("value_at") @db.Timestamptz(6) // time-window matching
+  // UNTRUSTED TEXT. Doc 08 §12 / doc 11 §14 — never interpolate raw into an LLM prompt
+  // as instruction context. Wrap in a data envelope.
+  description     String?
+  status          BankTransactionStatus @default(POSTED)
+  settlementId    String?               @map("settlement_id") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  merchant   Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  settlement Settlement? @relation(fields: [settlementId], references: [id])
+
+  @@index([merchantId, transactionDate])
+  @@index([utr])
+  @@index([settlementId])
+  @@map("bank_transactions")
+}
+
+// ============================================================
+// Event ingestion
+// ============================================================
+
+model WebhookEvent {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  eventId            String                  @unique @map("event_id") // replay protection, doc 11 §6
+  eventType          String                  @map("event_type")
+  merchantId         String?                 @map("merchant_id") @db.Uuid
+  payload            Json
+  receivedAt         DateTime                @default(now()) @map("received_at") @db.Timestamptz(6)
+  signatureVerified  Boolean                 @default(false) @map("signature_verified")
+  processingStatus   WebhookProcessingStatus @default(PENDING) @map("processing_status")
+  processingAttempts Int                     @default(0) @map("processing_attempts")
+  processingError    String?                 @map("processing_error")
+  correlationId      String?                 @map("correlation_id")
+
+  @@index([processingStatus])
+  @@index([eventType, receivedAt])
+  @@map("webhook_events")
+}
+
+// ============================================================
+// Reconciliation
+// ============================================================
+
+model ReconciliationRun {
+  id             String                  @id @default(uuid()) @db.Uuid
+  merchantId     String                  @map("merchant_id") @db.Uuid
+  status         ReconciliationRunStatus @default(IN_PROGRESS)
+  dateFrom       DateTime?               @map("date_from") @db.Date
+  dateTo         DateTime?               @map("date_to") @db.Date
+  startedAt      DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt     DateTime?               @map("finished_at") @db.Timestamptz(6)
+  totalRecords   Int                     @default(0) @map("total_records")
+  matchedCount   Int                     @default(0) @map("matched_count")
+  exceptionCount Int                     @default(0) @map("exception_count")
+  resolvedCount  Int                     @default(0) @map("resolved_count")
+  errorMessage   String?                 @map("error_message")
+  correlationId  String?                 @map("correlation_id")
+
+  merchant   Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  matches    ReconciliationMatch[]
+  exceptions Exception[]
+
+  @@index([merchantId, startedAt])
+  @@map("reconciliation_runs")
+}
+
+model ReconciliationMatch {
+  id          String          @id @default(uuid()) @db.Uuid
+  runId       String          @map("run_id") @db.Uuid
+  sourceType  MatchEntityType @map("source_type")
+  sourceId    String          @map("source_id") @db.Uuid
+  targetType  MatchEntityType @map("target_type")
+  targetId    String          @map("target_id") @db.Uuid
+  matchScore  Int             @map("match_score") // 0-100
+  matchMethod MatchMethod     @map("match_method")
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  run ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  // Re-running a job must not double-write matches (doc 10 §14).
+  @@unique([runId, sourceType, sourceId, targetType, targetId], name: "run_pair_unique")
+  @@index([runId])
+  @@index([sourceType, sourceId])
+  @@map("reconciliation_matches")
+}
+
+// ============================================================
+// Exceptions
+// ============================================================
+
+model Exception {
+  id          String        @id @default(uuid()) @db.Uuid
+  exceptionId String        @unique @map("exception_id") // human readable: EXC-1024
+  merchantId  String        @map("merchant_id") @db.Uuid
+  runId       String?       @map("run_id") @db.Uuid
+  type        ExceptionType
+  severity    Severity
+  status      ExceptionStatus @default(OPEN)
+
+  // AMENDMENT: doc 10 §12 requires stable dedup, doc 10 §14 requires idempotent reruns.
+  // Format: {merchantId}:{type}:{primaryEntityType}:{primaryEntityId}
+  // Upsert on this. Without it, every rerun clones the whole queue.
+  dedupKey String @unique @map("dedup_key")
+
+  primaryEntityType String? @map("primary_entity_type")
+  primaryEntityId   String? @map("primary_entity_id") @db.Uuid
+
+  expectedAmount   BigInt?     @map("expected_amount")
+  actualAmount     BigInt?     @map("actual_amount")
+  differenceAmount BigInt?     @map("difference_amount")
+  financialImpact  BigInt      @default(0) @map("financial_impact")
+  customerImpact   ImpactLevel @default(LOW) @map("customer_impact")
+  severityScore    Int         @default(0) @map("severity_score")
+
+  occurrenceCount Int       @default(1) @map("occurrence_count")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastSeenAt      DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolutionNote  String?   @map("resolution_note")
+
+  merchant   Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  run        ReconciliationRun? @relation(fields: [runId], references: [id])
+  events     ExceptionEvent[]
+  aiAnalyses AiAnalysis[]
+  actions    Action[]
+
+  @@index([merchantId, status, severity])
+  @@index([merchantId, createdAt])
+  @@index([type])
+  @@map("exceptions")
+}
+
+model ExceptionEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  exceptionId String   @map("exception_id") @db.Uuid
+  eventType   String   @map("event_type")
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id") @db.Uuid
+  snapshot    Json
+  // AMENDMENT: when the financial event actually happened. The timeline in doc 07
+  // orders by THIS, not created_at — otherwise every evidence item shares the
+  // timestamp of the reconciliation run that discovered it.
+  occurredAt  DateTime @map("occurred_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  exception Exception @relation(fields: [exceptionId], references: [id], onDelete: Cascade)
+
+  @@unique([exceptionId, eventType, entityId], name: "exception_event_unique")
+  @@index([exceptionId, occurredAt])
+  @@map("exception_events")
+}
+
+// ============================================================
+// AI layer  (analysis only — never a source of financial truth)
+// ============================================================
+
+model AiAnalysis {
+  id                 String   @id @default(uuid()) @db.Uuid
+  exceptionId        String   @map("exception_id") @db.Uuid
+  summary            String
+  likelyCause        String   @map("likely_cause")
+  confidence         Int // 0-100, evidence strength (doc 08 §10)
+  financialExposure  BigInt   @map("financial_exposure")
+  customerImpact     String   @map("customer_impact")
+  recommendedAction  String   @map("recommended_action")
+  evidenceChain      Json     @map("evidence_chain")
+  nextSteps          Json     @map("next_steps")
+  model              String
+  promptVersion      String   @map("prompt_version") // doc 08 §14
+  toolCalls          Json?    @map("tool_calls") // which tools ran + args, doc 08 §14
+  latencyMs          Int?     @map("latency_ms")
+  isFallback         Boolean  @default(false) @map("is_fallback")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  exception Exception @relation(fields: [exceptionId], references: [id], onDelete: Cascade)
+
+  @@index([exceptionId, createdAt])
+  @@map("ai_analyses")
+}
+
+// ============================================================
+// Actions  (the ONLY path to money movement)
+// ============================================================
+
+model Action {
+  id               String       @id @default(uuid()) @db.Uuid
+  merchantId       String       @map("merchant_id") @db.Uuid
+  exceptionId      String       @map("exception_id") @db.Uuid
+  actionType       ActionType   @map("action_type")
+  status           ActionStatus @default(PROPOSED)
+  parameters       Json
+  proposedByAi     Boolean      @default(false) @map("proposed_by_ai")
+  requestedById    String?      @map("requested_by") @db.Uuid
+  approvedById     String?      @map("approved_by") @db.Uuid
+  approvalRequired Boolean      @default(true) @map("approval_required")
+  approvedAt       DateTime?    @map("approved_at") @db.Timestamptz(6)
+  reviewReason     String?      @map("review_reason") // approve/reject rationale
+  policyDecision   Json?        @map("policy_decision") // full engine output, for audit
+  idempotencyKey   String       @unique @map("idempotency_key")
+  executionResult  Json?        @map("execution_result")
+  failureReason    String?      @map("failure_reason")
+  executedAt       DateTime?    @map("executed_at") @db.Timestamptz(6)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  merchant    Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  exception   Exception @relation(fields: [exceptionId], references: [id])
+  requestedBy User?     @relation("ActionRequestedBy", fields: [requestedById], references: [id])
+  approvedBy  User?     @relation("ActionApprovedBy", fields: [approvedById], references: [id])
+
+  @@index([merchantId, status])
+  @@index([exceptionId])
+  @@map("actions")
+}
+
+// ============================================================
+// Audit  (append-only — no update/delete paths in application code)
+// ============================================================
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  merchantId    String   @map("merchant_id") @db.Uuid
+  userId        String?  @map("user_id") @db.Uuid // null = system/worker actor
+  actorType     String   @default("USER") @map("actor_type") // USER | SYSTEM | AI
+  action        String
+  entityType    String   @map("entity_type")
+  entityId      String?  @map("entity_id") @db.Uuid
+  beforeState   Json?    @map("before_state")
+  afterState    Json?    @map("after_state")
+  reason        String?
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([merchantId, createdAt])
+  @@map("audit_logs")
+}

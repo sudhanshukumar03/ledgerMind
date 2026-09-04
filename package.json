@@ -1,0 +1,10 @@
+{
+  "name": "ledgermind-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Autonomous Financial Reconciliation System & AI Finance Controller",
+  "scripts": {
+    "dev:backend": "cd backend && npm run start:dev",
+    "dev:frontend": "cd frontend && npm run dev"
+  }
+}
