@@ -206,7 +206,10 @@ export class ActionsService {
    * @returns {Promise<void>} Resolves when the action completes.
    */
   async executeAction(actionId: string, merchantId: string, actorId?: string): Promise<void> {
-    const action = await this.prisma.action.findUnique({ where: { id: actionId } });
+    const action = await this.prisma.action.findUnique({ 
+      where: { id: actionId },
+      include: { exception: true }
+    });
     if (!action || action.merchantId !== merchantId) {
       throw new NotFoundException('Action not found');
     }
