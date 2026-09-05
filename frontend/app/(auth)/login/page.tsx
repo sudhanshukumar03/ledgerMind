@@ -57,6 +57,7 @@ export default function LoginPage() {
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: C.textSecondary }}>Email</label>
               <input
+                suppressHydrationWarning
                 id="email"
                 type="email"
                 className="input"
@@ -71,6 +72,7 @@ export default function LoginPage() {
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: C.textSecondary }}>Password</label>
               <input
+                suppressHydrationWarning
                 id="password"
                 type="password"
                 className="input"
@@ -98,7 +100,7 @@ export default function LoginPage() {
               </div>
             )}
 
-            <button id="login-submit" type="submit" disabled={loading} className="btn-primary w-full mt-2">
+            <button suppressHydrationWarning id="login-submit" type="submit" disabled={loading} className="btn-primary w-full mt-2">
               {loading ? (
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -118,6 +120,7 @@ export default function LoginPage() {
                 { label: 'Viewer', email: 'viewer@ledgermind.dev' },
               ].map(({ label, email: e }) => (
                 <button
+                  suppressHydrationWarning
                   key={label}
                   type="button"
                   onClick={() => { setEmail(e); setPassword('demo1234'); }}
