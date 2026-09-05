@@ -97,7 +97,10 @@ export class ActionsService {
   }
 
   async getActionById(id: string, merchantId: string) {
-    const action = await this.prisma.action.findUnique({ where: { id } });
+    const action = await this.prisma.action.findUnique({ 
+      where: { id },
+      include: { exception: true }
+    });
     if (!action || action.merchantId !== merchantId) {
       throw new NotFoundException('Action not found');
     }
