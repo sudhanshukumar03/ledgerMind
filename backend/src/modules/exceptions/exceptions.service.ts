@@ -35,8 +35,10 @@ export class ExceptionsService {
     }
 
     async findOne(merchantId: string, id: string) {
+        const isFriendlyId = id.startsWith('EXC-');
+        
         const exception = await this.prisma.exception.findFirst({
-            where: { id, merchantId },
+            where: isFriendlyId ? { exceptionId: id, merchantId } : { id, merchantId },
             include: { aiAnalyses: true },
         });
 
@@ -49,8 +51,10 @@ export class ExceptionsService {
 
     async getTimeline(merchantId: string, id: string) {
         // verify exception belongs to merchant
+        const isFriendlyId = id.startsWith('EXC-');
+        
         const exception = await this.prisma.exception.findFirst({
-            where: { id, merchantId }
+            where: isFriendlyId ? { exceptionId: id, merchantId } : { id, merchantId }
         });
 
         if (!exception) {
