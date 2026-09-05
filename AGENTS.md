@@ -68,8 +68,8 @@ _(Note: expand this into a sequence diagram once the NestJS module boundaries ar
 
 ## Model Selection
 
-- Primary model: **Google Gemini 3.6 Flash** (or higher), with function calling enabled.
-- The tool definitions are provided as Function Declarations to the Gemini API.
+- Primary model: **Groq API 3.6 Flash** (or higher), with function calling enabled.
+- The tool definitions are provided as Function Declarations to the Groq API.
 - The backend parses the function call requests and executes the corresponding NestJS service methods.
 - Responses are formatted as JSON for the frontend.
 

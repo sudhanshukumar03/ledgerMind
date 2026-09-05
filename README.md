@@ -142,7 +142,7 @@ flowchart TB
     subgraph ext["External Systems"]
         RZP["Razorpay<br/>mocked behind an interface"]
         BANKFEED["Bank statement feed<br/>synthetic generator"]
-        LLM["Gemini API"]
+        LLM["Groq API"]
     end
 
     subgraph client["Client — Vercel"]
@@ -249,7 +249,7 @@ Look at the last edge. Executing an action produces a *new* webhook, which re-en
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Recharts, lucide-react |
 | Backend | NestJS 10 (modular monolith), Prisma 5, PostgreSQL 16 |
 | Async | Redis + BullMQ — normalize, reconcile, execute queues |
-| AI | Google Gemini via `@google/genai` — function calling over read-only tools |
+| AI | Groq API via `openai` — function calling over read-only tools |
 | Auth | JWT Bearer + RBAC (`ADMIN`, `FINANCE`, `VIEWER`) |
 | Validation | Zod (frontend), `class-validator` + `class-transformer` (backend DTOs) |
 | Testing | Jest, Supertest, Playwright |
@@ -262,7 +262,7 @@ Look at the last edge. Executing an action produces a *new* webhook, which re-en
 
 ### Prerequisites
 
-**Node.js ≥ 20**, **Docker & Docker Compose**, and a **Gemini API key**.
+**Node.js ≥ 20**, **Docker & Docker Compose**, and a **Groq API key**.
 
 ### Setup
 
@@ -280,7 +280,7 @@ Fill in the required values:
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis connection string |
 | `JWT_SECRET` | Access-token signing secret |
-| `GEMINI_API_KEY` | AI Controller model access |
+| `GROQ_API_KEY` | AI Controller model access |
 | `RAZORPAY_WEBHOOK_SECRET` | HMAC SHA256 verification secret |
 | `POLICY_REFUND_MAX_PAISE` | Refund ceiling the Policy Engine enforces |
 
@@ -369,7 +369,7 @@ ledgermind/
 │   │   ├── transaction/        # Orders, payments, refunds, settlements, bank
 │   │   ├── reconciliation/     # Deterministic matching engine + run lifecycle
 │   │   ├── exception/          # Classification, severity, dedup, timeline
-│   │   ├── ai/                 # Gemini controller + 14 read-only tools
+│   │   ├── ai/                 # Groq controller + 14 read-only tools
 │   │   ├── policy/             # Evaluates every proposal
 │   │   ├── action/             # Proposal → approval → execution
 │   │   ├── audit/              # Correlated audit log

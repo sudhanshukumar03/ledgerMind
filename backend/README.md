@@ -17,7 +17,7 @@ NestJS modular monolith serving `/api/v1`, plus BullMQ workers. Nine modules, on
 | `transaction/` | Orders, payments, refunds, settlements, bank transactions, and the unified `/transactions` view |
 | `reconciliation/` | The matching ladder, exposure scoring, run lifecycle. **Pure deterministic code, no AI** |
 | `exception/` | Classification, `dedup_key` upsert, severity, timeline (`exception_events`) |
-| `ai/` | Gemini controller, 14 read-only merchant-scoped tools, analysis persistence with `prompt_version` and `tool_calls` |
+| `ai/` | Groq controller, 14 read-only merchant-scoped tools, analysis persistence with `prompt_version` and `tool_calls` |
 | `policy/` | Evaluates every proposed action against limits, role, and exposure. Rules live in env config for the MVP |
 | `action/` | `PROPOSED → PENDING_APPROVAL → APPROVED → EXECUTING → COMPLETED/FAILED`, plus provider execution |
 | `audit/` | Correlated audit log for every state change, analysis, policy decision, and execution |
@@ -52,7 +52,7 @@ Copy `.env.example` to `.env`:
 | `REDIS_URL` | Redis connection string for BullMQ |
 | `JWT_SECRET` | Access-token signing secret |
 | `JWT_EXPIRES_IN` | Token lifetime |
-| `GEMINI_API_KEY` | AI Controller model access |
+| `GROQ_API_KEY` | AI Controller model access |
 | `RAZORPAY_WEBHOOK_SECRET` | HMAC SHA256 verification secret |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Provider credentials — the provider is mocked behind an interface for the MVP |
 | `POLICY_REFUND_MAX_PAISE` | Refund ceiling the Policy Engine enforces |

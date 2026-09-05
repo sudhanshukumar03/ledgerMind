@@ -230,7 +230,7 @@ Examples:
 - `RAZORPAY_KEY_ID`
 - `RAZORPAY_KEY_SECRET`
 - `RAZORPAY_WEBHOOK_SECRET`
-- `GEMINI_API_KEY`
+- `GROQ_API_KEY`
 
 Use environment variables or a dedicated secret manager.
 

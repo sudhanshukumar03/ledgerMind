@@ -134,7 +134,7 @@ export default function AiControllerPage() {
     } catch {
       setMessages(prev => prev.map(m =>
         m.id === thinkingMsg.id
-          ? { ...m, content: 'Sorry, the AI controller is unavailable right now. Make sure the backend is running with a valid GEMINI_API_KEY.', loading: false }
+          ? { ...m, content: 'Sorry, the AI controller is unavailable right now. Make sure the backend is running with a valid GROQ_API_KEY.', loading: false }
           : m
       ));
     } finally {

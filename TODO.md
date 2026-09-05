@@ -22,7 +22,7 @@
 - [ ] Store reconciliation results and exceptions in database
 
 ## Phase 4: AI Controller (Day 5)
-- [x] Integrate Google Gemini API with function calling
+- [x] Integrate Groq API API with function calling
 - [ ] Define tools as NestJS service methods
 - [ ] Build investigation prompt and parse JSON response
 - [ ] Expose AI analysis via REST API

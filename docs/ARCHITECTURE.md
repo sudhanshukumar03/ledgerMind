@@ -29,7 +29,7 @@ flowchart TB
         RZP["Razorpay API<br/>mocked behind an interface"]
         WHSRC["Razorpay Webhooks"]
         BANKFEED["Bank statement feed<br/>scripts/generate-bank-data.ts"]
-        LLM["Gemini API<br/>function calling"]
+        LLM["Groq API<br/>function calling"]
     end
 
     subgraph client["Presentation — Vercel"]
@@ -335,7 +335,7 @@ sequenceDiagram
     participant API as NestJS API
     participant AI as AI Controller
     participant T as Read-only tools · 14
-    participant LLM as Gemini
+    participant LLM as Groq
     participant POL as Policy Engine
     actor ADM as Approver · ADMIN
     participant ACT as Action Engine

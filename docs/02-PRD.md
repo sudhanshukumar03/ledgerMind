@@ -95,7 +95,7 @@ These thresholds are enforced by the Policy Engine (see `05-SYSTEM-ARCHITECTURE.
 | **Cache / queues**    | Redis + BullMQ                                            | Webhook/event processing and background jobs   |
 | **Payments**          | Razorpay Test APIs                                        | Core payment integration                       |
 | **Webhooks**          | Razorpay Webhooks                                          | Real-time payment-event ingestion              |
-| **AI**                | Google Gemini API                                          | Finance-controller reasoning + tool calling    |
+| **AI**                | Groq API API                                          | Finance-controller reasoning + tool calling    |
 | **Agent framework**   | Your own tool-calling layer initially                       | More control and easier to explain to judges   |
 | **Authentication**    | JWT                                                          | Stateless merchant authentication              |
 | **Validation**        | Zod                                                        | Runtime/API validation                         |

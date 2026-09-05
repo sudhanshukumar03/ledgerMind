@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 import { Prisma, Severity } from '@prisma/client';
 import { z } from 'zod';
-import { GoogleGenAI, Type } from '@google/genai';
+import OpenAI from 'openai';
 
 const AiAnalysisSchema = z.object({
   summary: z.string().optional().default('No summary'),
@@ -200,36 +200,8 @@ const AI_TOOLS = [
   },
 ];
 
-// ─── Gemini Tool Mapping ──────────────────────────────────────────────────
-const GEMINI_TOOLS = [{
-  functionDeclarations: AI_TOOLS.map(t => {
-    const fn = (t as Record<string, unknown>).function as Record<string, unknown>;
-    const properties: Record<string, unknown> = {};
-    const params = fn.parameters as Record<string, unknown>;
-    if (params && params.properties) {
-      for (const [key, val] of Object.entries(params.properties as Record<string, unknown>)) {
-        const v = val as Record<string, unknown>;
-        properties[key] = {
-          type: v.type === 'string' ? Type.STRING :
-                v.type === 'number' ? Type.NUMBER :
-                v.type === 'boolean' ? Type.BOOLEAN :
-                v.type === 'array' ? Type.ARRAY : Type.STRING,
-          description: v.description,
-          enum: v.enum,
-        };
-      }
-    }
-    return {
-      name: fn.name,
-      description: fn.description,
-      parameters: params ? {
-        type: Type.OBJECT,
-        properties: Object.keys(properties).length > 0 ? properties : undefined,
-        required: params.required || undefined,
-      } : undefined
-    };
-  })
-}];
+// ─── Groq Tool Mapping ──────────────────────────────────────────────────
+// We don't need to remap AI_TOOLS for Groq, as they are already standard OpenAI JSON schemas.
 
 const SYSTEM_PROMPT = `You are LedgerMind's AI Finance Controller. Your role is to:
 - Investigate reconciliation exceptions and explain discrepancies in plain English
@@ -248,14 +220,16 @@ CRITICAL CONSTRAINTS:
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private gemini: GoogleGenAI;
+  private client: OpenAI;
 
   constructor(private readonly prisma: PrismaService) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY is not set');
+    if (!process.env.GROQ_API_KEY) {
+      throw new Error('GROQ_API_KEY is not set');
     }
-    this.gemini = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+    this.client = new OpenAI({
+      baseURL: 'https://api.groq.com/openai/v1',
+      apiKey: process.env.GROQ_API_KEY,
+      timeout: 30000,
     });
   }
 
@@ -470,7 +444,7 @@ export class AiService {
         recommendedAction: analysisResult.recommended_action ?? 'MANUAL_REVIEW',
         evidenceChain: analysisResult.evidence_chain ?? [],
         nextSteps: analysisResult.next_steps ?? [],
-        model: process.env.AI_MODEL || 'gemini-3.6-flash',
+        model: process.env.AI_MODEL || 'llama-3.3-70b-versatile',
         promptVersion: '2.0',
         toolCalls: toolCallLog as Prisma.InputJsonValue[],
       },
@@ -497,114 +471,83 @@ export class AiService {
 
   // ─── Core tool loop ───────────────────────────────────────────────────────
 
-  private mapMessagesToGemini(messages: { role: string; content?: string }[]) {
-    const contents: unknown[] = [];
-    let systemInstruction = SYSTEM_PROMPT;
-
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemInstruction = msg.content as string;
-      } else if (msg.role === 'user') {
-        contents.push({ role: 'user', parts: [{ text: msg.content as string }] });
-      } else if (msg.role === 'assistant') {
-        if (msg.content) {
-          contents.push({ role: 'model', parts: [{ text: msg.content as string }] });
-        }
-      }
-    }
-    return { contents, systemInstruction };
-  }
-
   private async runToolLoop(
-    messages: { role: string; content?: string }[],
+    userMessages: { role: string; content?: string }[],
     merchantId: string,
     maxRounds = 6,
   ): Promise<{ finalMessage: { content: unknown }; toolCallLog: unknown[] }> {
-    this.logger.log('Starting Gemini investigation loop');
+    this.logger.log('Starting Groq investigation loop');
     const toolCallLog: unknown[] = [];
-    const { contents, systemInstruction } = this.mapMessagesToGemini(messages);
+    
+    // In Groq/OpenAI, we just pass the messages directly.
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [...userMessages] as any;
+    
+    const model = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
 
     for (let round = 0; round < maxRounds; round++) {
       let response;
       try {
-        response = await this.gemini.models.generateContent({
-          model: process.env.AI_MODEL || 'gemini-3.6-flash',
-          contents: contents as any[],
-          config: {
-            tools: GEMINI_TOOLS as any,
-            systemInstruction,
-            responseMimeType: 'application/json',
-          }
+        response = await this.client.chat.completions.create({
+          model,
+          messages,
+          tools: AI_TOOLS as OpenAI.Chat.ChatCompletionTool[],
+          tool_choice: 'auto',
+          response_format: { type: 'json_object' } // Enforce JSON output for our needs
         });
       } catch (err: unknown) {
-        this.logger.error(`Gemini API failed during tool loop: ${(err as Error).message}`);
+        this.logger.error(`Groq API failed during tool loop: ${(err as Error).message}`);
         return { 
           finalMessage: { content: '{"summary":"I am currently experiencing technical difficulties connecting to the AI provider. Please try again later.","likely_cause":"AI Service Unavailable"}' }, 
           toolCallLog 
         };
       }
 
-      const fnCalls = response.functionCalls;
-      if (!fnCalls || fnCalls.length === 0) {
+      const message = response.choices[0].message;
+      const toolCalls = message.tool_calls;
+      
+      // If there are no tool calls, this is the final response
+      if (!toolCalls || toolCalls.length === 0) {
         return { 
-          finalMessage: { content: response.text ?? '{}' }, 
+          finalMessage: { content: message.content ?? '{}' }, 
           toolCallLog 
         };
       }
 
-      // Add the full model response to contents history (preserves thought_signatures)
-      const modelContent = response.candidates?.[0]?.content;
-      if (modelContent) {
-        contents.push(modelContent);
-      } else {
-        contents.push({
-          role: 'model',
-          parts: fnCalls.map(tc => ({ functionCall: { name: tc.name, args: tc.args } }))
-        });
-      }
+      // Add the assistant's message with tool calls to the history
+      messages.push(message);
 
-      const functionResponses = [];
-
-      for (const tc of fnCalls) {
-        const args = tc.args as Record<string, unknown>;
+      // Execute each tool and append the results
+      for (const tc of toolCalls) {
+        if (tc.type !== 'function') continue;
+        
+        const args = JSON.parse(tc.function.arguments || '{}');
         let result: unknown;
         try {
-          result = await this.dispatchTool(tc.name, args, merchantId);
+          result = await this.dispatchTool(tc.function.name, args, merchantId);
         } catch (e: unknown) {
           result = { error: `Failed to execute tool: ${(e as Error).message}` };
         }
-        toolCallLog.push({ tool: tc.name, args, result });
         
-        // Gemini requires the response to be a JSON object (protobuf Struct), not an array or primitive
-        const safeResponse = (Array.isArray(result) || typeof result !== 'object' || result === null)
-          ? { data: result } 
-          : result;
-
-        functionResponses.push({
-          functionResponse: { name: tc.name, response: safeResponse }
+        toolCallLog.push({ tool: tc.function.name, args, result });
+        
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: typeof result === 'string' ? result : JSON.stringify(result)
         });
       }
-
-      // Add the function responses back to contents history
-      contents.push({
-        role: 'user',
-        parts: functionResponses
-      });
     }
 
     // Fallback: force a final non-tool response if max rounds hit
     let fallback;
     try {
-      fallback = await this.gemini.models.generateContent({
-        model: process.env.AI_MODEL || 'gemini-3.6-flash',
-        contents: contents as any[],
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-        }
+      fallback = await this.client.chat.completions.create({
+        model,
+        messages,
+        response_format: { type: 'json_object' }
       });
     } catch (err: unknown) {
-      this.logger.error(`Gemini API failed during fallback: ${(err as Error).message}`);
+      this.logger.error(`Groq API failed during fallback: ${(err as Error).message}`);
       return { 
         finalMessage: { content: '{"summary":"I am currently experiencing technical difficulties connecting to the AI provider. Please try again later.","likely_cause":"AI Service Unavailable"}' }, 
         toolCallLog 
@@ -612,7 +555,7 @@ export class AiService {
     }
 
     return { 
-      finalMessage: { content: fallback.text ?? '{}' }, 
+      finalMessage: { content: fallback.choices[0].message.content ?? '{}' }, 
       toolCallLog 
     };
   }

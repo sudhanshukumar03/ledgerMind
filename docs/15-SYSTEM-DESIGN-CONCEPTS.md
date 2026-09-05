@@ -370,7 +370,7 @@ The system must retain enough context to understand why the job failed.
 
 ## 18. Circuit Breaker
 
-For external services such as Razorpay or Gemini, a circuit breaker can prevent cascading failures.
+For external services such as Razorpay or Groq, a circuit breaker can prevent cascading failures.
 
 Conceptually:
 ```text
