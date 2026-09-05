@@ -49,7 +49,7 @@ export default function TransactionsPage() {
     <div className="flex flex-col h-full bg-bg">
       <Header title="Transactions" />
 
-      <div className="flex-1 overflow-auto p-8 flex flex-col gap-6 max-w-[1200px] w-full mx-auto">
+      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
         
         {/* Tabs */}
         <div 
@@ -95,7 +95,7 @@ export default function TransactionsPage() {
                     : payments.length === 0
                     ? <tr><td colSpan={5} className="text-center py-12 text-[13px]" style={{ color: C.textMuted }}>No payments found</td></tr>
                     : payments.map(p => (
-                      <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                      <tr key={p.id} className="table-row-hover">
                         <td className="px-4 py-3 text-[13px] font-mono" style={{ color: C.textSecondary }}>{p.paymentId}</td>
                         <td className="px-4 py-3 text-[14px] font-semibold text-right" style={{ color: C.textPrimary }}><Amount value={p.amount} /></td>
                         <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
@@ -136,7 +136,7 @@ export default function TransactionsPage() {
                     : settlements.length === 0
                     ? <tr><td colSpan={5} className="text-center py-12 text-[13px]" style={{ color: C.textMuted }}>No settlements found</td></tr>
                     : settlements.map(s => (
-                      <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                      <tr key={s.id} className="table-row-hover">
                         <td className="px-4 py-3 text-[13px] font-mono" style={{ color: C.textSecondary }}>{s.settlementId}</td>
                         <td className="px-4 py-3 text-[14px] font-semibold text-right" style={{ color: C.textPrimary }}><Amount value={s.amount} /></td>
                         <td className="px-4 py-3"><StatusBadge status={s.status} /></td>

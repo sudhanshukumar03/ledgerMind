@@ -5,6 +5,10 @@ import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { json } from 'express';
 
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     rawBody: true, // ← Required for webhook HMAC verification

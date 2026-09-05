@@ -335,10 +335,10 @@ export class ActionsService {
     }
 
     this.logger.log(
-      `Issuing refund on payment ${params.payment_id} for ₹${((params.amount ?? 0) / 100).toFixed(2)}`,
+      `Issuing refund on payment ${payment.paymentId} for ₹${((params.amount ?? 0) / 100).toFixed(2)}`,
     );
 
-    const refund = await this.razorpay.createRefund(params.payment_id, params.amount);
+    const refund = await this.razorpay.createRefund(payment.paymentId, params.amount);
 
     // Persist the refund record if not already present
     await this.prisma.refund.upsert({

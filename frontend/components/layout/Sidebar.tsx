@@ -55,15 +55,11 @@ export function Sidebar() {
         {NAV.map(({ href, label, icon: Icon, badge }) => {
           const active = isActive(href);
           return (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              style={{
-                backgroundColor: active ? C.primaryTint : 'transparent',
-                color: active ? C.primary : C.textSecondary,
-              }}
-            >
+              <Link
+                key={href}
+                href={href}
+                className={active ? 'nav-item-active' : 'nav-item'}
+              >
               <Icon className="w-4 h-4" />
               <span>{label}</span>
               {badge && (
@@ -95,7 +91,7 @@ export function Sidebar() {
           <button
             onClick={logout}
             title="Sign out"
-            className="p-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+            className="p-1.5 rounded-lg hover-bg-muted"
             style={{ color: C.textMuted }}
           >
             <LogOut className="w-4 h-4" />

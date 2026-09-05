@@ -2,6 +2,9 @@ import { Controller, Post, Get, Body, Request, UseGuards } from '@nestjs/common'
 import { ReconciliationService } from './reconciliation.service.js';
 import { RunReconciliationDto } from './dto/run-reconciliation.dto.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.decorator.js';
+import { Role } from '@prisma/client';
 
 @Controller('reconciliation')
 @UseGuards(JwtAuthGuard)
@@ -13,6 +16,8 @@ export class ReconciliationController {
    * merchantId is ALWAYS sourced from the JWT — never from the request body.
    */
   @Post('run')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.FINANCE)
   run(@Body() dto: RunReconciliationDto, @Request() req: any) {
     return this.reconciliationService.runReconciliation({
       merchantId: req.user.merchantId,

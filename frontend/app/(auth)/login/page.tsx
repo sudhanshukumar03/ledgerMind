@@ -60,7 +60,7 @@ export default function LoginPage() {
           <h2 className="text-lg font-semibold mb-1" style={{ color: C.textPrimary }}>Sign in</h2>
           <p className="text-xs mb-6" style={{ color: C.textMuted }}>Access your reconciliation dashboard</p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" aria-label="Login form">
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: C.textSecondary }}>Email</label>
               <input
@@ -71,6 +71,8 @@ export default function LoginPage() {
                 onChange={e => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
+                aria-invalid={!!error}
+                aria-describedby={error ? "login-error" : undefined}
               />
             </div>
             <div>
@@ -83,11 +85,16 @@ export default function LoginPage() {
                 onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
+                aria-invalid={!!error}
+                aria-describedby={error ? "login-error" : undefined}
               />
             </div>
 
             {error && (
               <div 
+                id="login-error"
+                role="alert"
+                aria-live="polite"
                 className="flex items-center gap-2 text-xs rounded-lg px-3 py-2"
                 style={{ color: C.critical, backgroundColor: C.criticalTint, borderColor: C.criticalTint }}
               >
@@ -121,7 +128,7 @@ export default function LoginPage() {
                   key={label}
                   type="button"
                   onClick={() => { setEmail(e); setPassword('demo1234'); }}
-                  className="text-xs py-1.5 rounded-lg border transition-colors hover:bg-gray-50"
+                  className="text-xs py-1.5 rounded-lg border hover-bg-muted"
                   style={{ color: C.textSecondary, borderColor: C.border }}
                 >
                   {label}

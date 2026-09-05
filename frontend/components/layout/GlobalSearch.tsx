@@ -99,7 +99,7 @@ export function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <button onClick={onClose} className="p-2 rounded-md hover:bg-gray-100 transition-colors" style={{ color: C.textMuted }}>
+          <button onClick={onClose} className="p-2 rounded-md transition-colors hover-bg-muted" style={{ color: C.textMuted }}>
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -143,9 +143,9 @@ export function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
         {/* Footer */}
         <div className="px-4 py-3 border-t text-[11px] flex items-center justify-between" style={{ borderColor: C.border, color: C.textMuted }}>
           <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border bg-gray-50" style={{ borderColor: C.border }}>↑</kbd> <kbd className="px-1.5 py-0.5 rounded border bg-gray-50" style={{ borderColor: C.border }}>↓</kbd> to navigate</span>
-            <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border bg-gray-50" style={{ borderColor: C.border }}>Enter</kbd> to select</span>
-            <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border bg-gray-50" style={{ borderColor: C.border }}>Esc</kbd> to close</span>
+            <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border" style={{ borderColor: C.border, backgroundColor: C.neutralTint }}>↑</kbd> <kbd className="px-1.5 py-0.5 rounded border" style={{ borderColor: C.border, backgroundColor: C.neutralTint }}>↓</kbd> to navigate</span>
+            <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border" style={{ borderColor: C.border, backgroundColor: C.neutralTint }}>Enter</kbd> to select</span>
+            <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded border" style={{ borderColor: C.border, backgroundColor: C.neutralTint }}>Esc</kbd> to close</span>
           </div>
         </div>
       </div>

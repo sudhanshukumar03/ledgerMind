@@ -11,13 +11,26 @@ export function KeyboardNav({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let keyBuffer = '';
-    let timeoutId: any;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    // Returns true if keyboard focus is inside a text input or a modal dialog
+    const isCaptured = (e: KeyboardEvent): boolean => {
+      const t = e.target as HTMLElement;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement ||
+        t.isContentEditable
+      ) return true;
+      // Block if any modal/dialog is open
+      if (document.querySelector('[role="dialog"], [data-modal]')) return true;
+      return false;
+    };
+
+    const isMod = (e: KeyboardEvent) => e.metaKey || e.ctrlKey;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
+      if (isCaptured(e)) return;
 
       if (e.key === '?') {
         setShowHelp(true);
@@ -33,13 +46,13 @@ export function KeyboardNav({ children }: { children: React.ReactNode }) {
 
       if (keyBuffer === 'gd') router.push('/');
       if (keyBuffer === 'ge') router.push('/exceptions');
-      if (keyBuffer === 'gr') router.push('/reconciliations');
+      if (keyBuffer === 'gr') router.push('/reconciliation');  // typo fix
       if (keyBuffer === 'ga') router.push('/actions');
 
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         keyBuffer = '';
-      }, 1000);
+      }, 800); // 800ms buffer per spec
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -79,7 +92,7 @@ export function KeyboardNav({ children }: { children: React.ReactNode }) {
                 </div>
               ))}
             </div>
-            <div className="p-4 border-t bg-gray-50 text-center" style={{ borderColor: C.border }}>
+            <div className="p-4 border-t text-center" style={{ borderColor: C.border, backgroundColor: C.neutralTint }}>
               <button onClick={() => setShowHelp(false)} className="text-[12px] font-medium" style={{ color: C.primary }}>
                 Close (Esc)
               </button>

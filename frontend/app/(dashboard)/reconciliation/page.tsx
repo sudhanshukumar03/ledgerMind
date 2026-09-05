@@ -6,22 +6,26 @@ import { Header } from '../../../components/layout/Header';
 import { StatCard } from '../../../components/ui/StatCard';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { C } from '../../../lib/tokens';
-import { Play, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Play, Loader2, AlertCircle, CheckCircle2, RefreshCcw } from 'lucide-react';
 import useSWR from 'swr';
+import { useSetInProgressRun } from '../../../components/providers/SWRProvider';
 
 export default function ReconciliationPage() {
   const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [running, setRunning] = useState(false);
+  const setInProgressRun = useSetInProgressRun();
 
   const { data: runs = [], isLoading: loading, mutate } = useSWR(
     'reconciliation-runs',
     () => reconciliationApi.listRuns()
             .then(r => Array.isArray(r.data) ? r.data : (r.data as any).data ?? []),
-    {
-      fallbackData: [],
-      refreshInterval: (data) => (data?.[0]?.status === 'IN_PROGRESS' ? 2000 : 0)
-    }
+    { fallbackData: [] }
   );
+
+  // Sync IN_PROGRESS state to global SWR polling context
+  useEffect(() => {
+    setInProgressRun(runs[0]?.status === 'IN_PROGRESS');
+  }, [runs, setInProgressRun]);
 
   const triggerRun = async () => {
     setRunning(true);
@@ -71,7 +75,7 @@ export default function ReconciliationPage() {
         }
       />
 
-      <div className="flex-1 overflow-auto p-8 flex flex-col gap-6 max-w-[1200px] w-full mx-auto">
+      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
         
         {msg && (
           <div 
@@ -129,17 +133,17 @@ export default function ReconciliationPage() {
                   const pct = run.totalRecords > 0 ? (run.matchedCount / run.totalRecords) * 100 : 0;
                   
                   return (
-                    <tr key={run.id} className="hover:bg-gray-50 transition-colors">
+                    <tr key={run.id} className="table-row-hover">
                       <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
                       <td className="px-4 py-3 text-[13px]" style={{ color: C.textSecondary }}>{started.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</td>
-                      <td className="px-4 py-3 text-[13px] font-mono" style={{ color: C.textSecondary }}>{dur != null ? `${dur}s` : '—'}</td>
+                      <td className="px-4 py-3 text-[13px] font-mono" style={{ color: C.textSecondary }}>{dur != null ? `${dur}s` : run.status === 'IN_PROGRESS' ? <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />Running</span> : '—'}</td>
                       <td className="px-4 py-3 text-[13px] font-mono" style={{ color: C.textSecondary }}>{run.totalRecords ?? '—'}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3 w-32">
                           <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: C.neutralTint }}>
                             <div 
                               className="h-full rounded-full transition-all duration-500" 
-                              style={{ width: `${pct}%`, backgroundColor: pct >= 90 ? C.success : pct >= 70 ? C.warning : run.status === 'FAILED' ? C.critical : C.critical }} 
+                              style={{ width: `${pct}%`, backgroundColor: pct >= 90 ? C.success : pct >= 70 ? C.warning : C.critical }} 
                             />
                           </div>
                           <span className="text-[12px] font-mono" style={{ color: C.textSecondary }}>{Math.round(pct)}%</span>
@@ -147,7 +151,19 @@ export default function ReconciliationPage() {
                       </td>
                       <td className="px-4 py-3">
                         {run.status === 'FAILED' ? (
-                          <span className="text-[13px] font-semibold text-red-500">Failed</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[13px] font-semibold" style={{ color: C.critical }}>Failed</span>
+                            <button
+                              onClick={triggerRun}
+                              disabled={running}
+                              className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border transition-colors"
+                              style={{ borderColor: C.border, color: C.textSecondary, backgroundColor: C.surface }}
+                              title="Retry reconciliation run"
+                            >
+                              <RefreshCcw className="w-3 h-3" />
+                              Retry
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-[13px] font-semibold" style={{ color: (run.exceptionCount ?? 0) > 0 ? C.critical : C.success }}>
                             {run.exceptionCount ?? 0}

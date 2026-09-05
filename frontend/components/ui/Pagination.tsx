@@ -45,8 +45,8 @@ export function Pagination({ currentPage, totalPages, onPageChange, isLoading = 
             <button
               onClick={() => onPageChange(currentPage - 1)}
               disabled={currentPage === 1 || isLoading}
-              className="relative inline-flex items-center rounded-l-md px-2 py-2 text-sm focus:z-20 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
-              style={{ color: C.textMuted, border: `1px solid ${C.border}`, backgroundColor: '#fff' }}
+              className="relative inline-flex items-center rounded-l-md px-2 py-2 text-sm focus:z-20 disabled:opacity-50 disabled:cursor-not-allowed hover-bg-muted"
+              style={{ color: C.textMuted, border: `1px solid ${C.border}`, backgroundColor: C.surface }}
             >
               <span className="sr-only">Previous</span>
               <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -54,8 +54,8 @@ export function Pagination({ currentPage, totalPages, onPageChange, isLoading = 
             <button
               onClick={() => onPageChange(currentPage + 1)}
               disabled={currentPage === totalPages || isLoading}
-              className="relative inline-flex items-center rounded-r-md px-2 py-2 text-sm focus:z-20 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
-              style={{ color: C.textMuted, border: `1px solid ${C.border}`, backgroundColor: '#fff' }}
+              className="relative inline-flex items-center rounded-r-md px-2 py-2 text-sm focus:z-20 disabled:opacity-50 disabled:cursor-not-allowed hover-bg-muted"
+              style={{ color: C.textMuted, border: `1px solid ${C.border}`, backgroundColor: C.surface }}
             >
               <span className="sr-only">Next</span>
               <ChevronRight className="h-4 w-4" aria-hidden="true" />

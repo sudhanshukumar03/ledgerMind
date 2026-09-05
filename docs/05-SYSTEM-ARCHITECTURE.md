@@ -365,7 +365,7 @@ New Webhook / Reconciliation
 | Database          | PostgreSQL                 |
 | Queue             | BullMQ                     |
 | Message Broker    | Redis                      |
-| AI                | OpenAI API                 |
+| AI                | Google Gemini API          |
 | Validation        | Zod / NestJS DTO validation|
 | Authentication    | JWT                        |
 | Testing           | Jest + Supertest + Playwright |

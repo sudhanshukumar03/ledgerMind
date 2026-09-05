@@ -30,7 +30,7 @@ Examples:
 
 Examples:
 - Razorpay API failure
-- OpenAI timeout
+- Gemini API timeout
 - Bank API unavailable
 
 ### Infrastructure Errors

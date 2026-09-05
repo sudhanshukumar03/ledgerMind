@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { ThemeProvider as NextThemeProvider } from 'next-themes';
 import { User, getUser } from '../lib/api-client';
 
 interface AuthContextValue {
@@ -39,9 +40,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, logout }}>
-      {children}
-    </AuthContext.Provider>
+    <NextThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <AuthContext.Provider value={{ user, setUser, logout }}>
+        {children}
+      </AuthContext.Provider>
+    </NextThemeProvider>
   );
 }
 

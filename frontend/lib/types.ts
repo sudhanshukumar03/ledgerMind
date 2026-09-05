@@ -89,6 +89,7 @@ export interface ChatMessage {
 export interface ChatResponse {
   message: string;
   tool_calls_made: number;
+  tool_calls?: { tool: string; args: any; result: any }[];
   suggested_actions: string[];
 }
 

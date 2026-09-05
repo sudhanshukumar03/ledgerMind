@@ -10,9 +10,12 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   toolCallsMade?: number;
+  toolCalls?: { tool: string; args: any; result: any }[];
   suggestedActions?: string[];
   loading?: boolean;
 }
+
+import { ToolCallList } from '../../../components/ai/ToolCallList';
 
 const QUICK_PROMPTS = [
   { text: 'Show me all critical exceptions', icon: <ShieldAlert className="w-3 h-3" /> },
@@ -22,6 +25,8 @@ const QUICK_PROMPTS = [
   { text: 'List unresolved refund delays', icon: <XCircle className="w-3 h-3" /> },
   { text: 'What actions are pending approval?', icon: <Zap className="w-3 h-3" /> },
 ];
+
+import { PlainText } from '../../../components/ai/PlainText';
 
 function AssistantBubble({ msg }: { msg: Message }) {
   if (msg.loading) {
@@ -52,16 +57,18 @@ function AssistantBubble({ msg }: { msg: Message }) {
       <div className="flex flex-col gap-1 w-full max-w-2xl">
         <div className="text-[11px] font-semibold" style={{ color: C.textSecondary }}>LedgerMind AI</div>
         <div className="px-5 py-4 rounded-2xl rounded-tl-sm border" style={{ backgroundColor: C.surface, borderColor: C.border }}>
-          <p className="text-[14px] leading-relaxed whitespace-pre-wrap" style={{ color: C.textPrimary }}>{msg.content}</p>
+          <PlainText text={msg.content} className="text-[14px] leading-relaxed whitespace-pre-wrap block" style={{ color: C.textPrimary }} />
           
           {(msg.toolCallsMade || msg.suggestedActions?.length) ? (
             <div className="mt-4 pt-3 border-t flex flex-col gap-3" style={{ borderColor: C.border }}>
-              {msg.toolCallsMade !== undefined && msg.toolCallsMade > 0 && (
+              {msg.toolCalls && msg.toolCalls.length > 0 ? (
+                <ToolCallList toolCalls={msg.toolCalls as any} />
+              ) : msg.toolCallsMade !== undefined && msg.toolCallsMade > 0 ? (
                 <div className="flex items-center gap-1.5 text-[11px] font-mono" style={{ color: C.textMuted }}>
                   <Activity className="w-3.5 h-3.5" />
                   Executed {msg.toolCallsMade} tool call{msg.toolCallsMade !== 1 ? 's' : ''} to retrieve live data
                 </div>
-              )}
+              ) : null}
               {msg.suggestedActions && msg.suggestedActions.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {msg.suggestedActions.slice(0, 3).map((a, i) => (
@@ -121,13 +128,13 @@ export default function AiControllerPage() {
       const data: ChatResponse = res.data;
       setMessages(prev => prev.map(m =>
         m.id === thinkingMsg.id
-          ? { ...m, content: data.message ?? 'No response', loading: false, toolCallsMade: data.tool_calls_made, suggestedActions: data.suggested_actions }
+          ? { ...m, content: data.message ?? 'No response', loading: false, toolCallsMade: data.tool_calls_made, toolCalls: data.tool_calls, suggestedActions: data.suggested_actions }
           : m
       ));
     } catch {
       setMessages(prev => prev.map(m =>
         m.id === thinkingMsg.id
-          ? { ...m, content: 'Sorry, the AI controller is unavailable right now. Make sure the backend is running with a valid OPENAI_API_KEY.', loading: false }
+          ? { ...m, content: 'Sorry, the AI controller is unavailable right now. Make sure the backend is running with a valid GEMINI_API_KEY.', loading: false }
           : m
       ));
     } finally {
@@ -178,8 +185,8 @@ export default function AiControllerPage() {
               <div key={msg.id} className="flex justify-end gap-4 animate-fade-in">
                 <div className="flex flex-col gap-1 w-full max-w-2xl items-end">
                   <div className="text-[11px] font-semibold" style={{ color: C.textSecondary }}>You</div>
-                  <div className="px-5 py-3 rounded-2xl rounded-tr-sm text-[14px] leading-relaxed shadow-sm" style={{ backgroundColor: C.primary, color: C.bg }}>
-                    {msg.content}
+                  <div className="px-5 py-3 rounded-2xl rounded-tr-sm shadow-sm" style={{ backgroundColor: C.primary, color: C.bg }}>
+                    <PlainText text={msg.content} className="text-[14px] leading-relaxed whitespace-pre-wrap block" />
                   </div>
                 </div>
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: C.neutralTint, color: C.textPrimary }}>

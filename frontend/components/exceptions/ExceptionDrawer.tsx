@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { exceptionsApi, actionsApi, aiApi, Exception, AiAnalysis, ChatMessage, ChatResponse } from '../../lib/api-client';
+import { exceptionsApi, actionsApi, aiApi, Exception, AiAnalysis } from '../../lib/api-client';
 import { C } from '../../lib/tokens';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Amount } from '../ui/Amount';
 import { Bot, User, Send, Loader2, Zap, ShieldAlert, X, Copy, Check } from 'lucide-react';
 import { PlainText } from '../ui/PlainText';
+import { AiChatThread } from '../ai/AiChatThread';
 
 function Confidence({ value }: { value: number }) {
   const color = value >= 80 ? C.success : value >= 50 ? C.warning : C.critical;
@@ -27,22 +28,32 @@ interface Message {
   loading?: boolean;
 }
 
-export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => void }) {
+export function ExceptionDrawer({
+  id,
+  onClose,
+  triggerRef,
+}: {
+  id: string;
+  onClose: () => void;
+  triggerRef?: React.RefObject<HTMLElement>;
+}) {
   const [activeTab, setActiveTab] = useState<'details' | 'ask_ai'>('details');
   const [exc, setExc] = useState<Exception | null>(null);
-  const [analysis, setAnalysis] = useState<AiAnalysis | null>(null);
-  const [investigating, setInvestigating] = useState(false);
-  const [investigationError, setInvestigationError] = useState('');
   
   const [proposing, setProposing] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Chat state
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // Return focus to the trigger row when drawer closes
+  const handleClose = () => {
+    onClose();
+    // Defer so the drawer is unmounted before focus shift
+    setTimeout(() => {
+      triggerRef?.current?.focus();
+    }, 0);
+  };
+
+  // Chat state removed as we use AiChatThread for one-shot investigation
 
   const [copied, setCopied] = useState(false);
   const handleCopyLink = async () => {
@@ -62,35 +73,12 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
     exceptionsApi.get(id)
       .then(r => {
         setExc(r.data);
-        if (r.data.aiAnalyses?.[0]) setAnalysis(r.data.aiAnalyses[0]);
-        setMessages([
-          {
-            id: genId(),
-            role: 'assistant',
-            content: `I am ready to help you investigate exception ${r.data.exceptionId}. What would you like to know?`
-          }
-        ]);
       })
       .catch(() => onClose())
       .finally(() => setLoading(false));
   }, [id, onClose]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, activeTab]);
 
-  const investigate = async () => {
-    setInvestigating(true);
-    setInvestigationError('');
-    try {
-      const res = await exceptionsApi.investigate(id);
-      setAnalysis(res.data);
-    } catch (e: any) {
-      setInvestigationError(e.response?.data?.message || 'Investigation failed');
-    } finally {
-      setInvestigating(false);
-    }
-  };
 
   const propose = async (type: string, amount?: number) => {
     if (!exc) return;
@@ -112,51 +100,21 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
     }
   };
 
-  const send = async (text?: string) => {
-    const content = text ?? input.trim();
-    if (!content || sending || !exc) return;
-    setInput('');
-
-    const userMsg: Message = { id: genId(), role: 'user', content };
-    const thinkingMsg: Message = { id: genId(), role: 'assistant', content: '', loading: true };
-
-    setMessages(prev => [...prev, userMsg, thinkingMsg]);
-    setSending(true);
-
-    const history: ChatMessage[] = [
-      { role: 'user', content: `Context: I am looking at exception ${exc.exceptionId} of type ${exc.type}.` },
-      ...messages.filter(m => !m.loading).map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content }
-    ];
-
-    try {
-      const res = await aiApi.chat(history);
-      const data: ChatResponse = res.data;
-      setMessages(prev => prev.map(m =>
-        m.id === thinkingMsg.id
-          ? { ...m, content: data.message ?? 'No response', loading: false }
-          : m
-      ));
-    } catch {
-      setMessages(prev => prev.map(m =>
-        m.id === thinkingMsg.id
-          ? { ...m, content: 'Sorry, the AI controller is unavailable right now.', loading: false }
-          : m
-      ));
-    } finally {
-      setSending(false);
-    }
-  };
-
   return (
     <>
-      <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-bg shadow-2xl z-50 flex flex-col animate-slide-left border-l" style={{ borderColor: C.border }}>
+      <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity" onClick={handleClose} />
+      <div 
+        role="dialog"
+        aria-modal="true"
+        aria-label="Exception Details"
+        className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-bg shadow-2xl z-50 flex flex-col animate-slide-left border-l" 
+        style={{ borderColor: C.border }}
+      >
         
         {/* Header */}
         <div className="shrink-0 px-6 py-5 border-b flex items-start justify-between bg-surface" style={{ borderColor: C.border }}>
           {loading ? (
-            <div className="h-6 w-32 bg-gray-200 animate-pulse rounded" />
+            <div className="h-6 w-32 animate-pulse rounded" style={{ backgroundColor: C.neutralTint }} />
           ) : exc ? (
             <div>
               <div className="flex items-center gap-3 mb-1.5">
@@ -167,42 +125,28 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
             </div>
           ) : <div />}
           <div className="flex items-center gap-1 ml-4 shrink-0">
-            <button onClick={handleCopyLink} className="p-1 rounded-md hover:bg-gray-100 transition-colors relative" title="Copy link to exception">
+            <button onClick={handleCopyLink} className="p-1 rounded-md transition-colors hover-bg-muted relative" title="Copy link to exception">
               {copied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5 text-gray-500" />}
             </button>
-            <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 transition-colors" title="Close">
+            <button onClick={handleClose} className="p-1 rounded-md transition-colors hover-bg-muted" title="Close">
               <X className="w-5 h-5 text-gray-500" />
             </button>
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs - Now just a single Details tab or maybe we can just keep the header, no tabs needed since there's only one. */}
         <div className="flex px-6 py-3 border-b bg-surface shrink-0 gap-2 items-center" style={{ borderColor: C.border }}>
           <button
-            onClick={() => setActiveTab('details')}
             className={`px-4 py-1.5 text-[13px] font-medium rounded-full transition-colors`}
             style={{
-              backgroundColor: activeTab === 'details' ? C.primary : 'transparent',
-              color: activeTab === 'details' ? C.bg : C.textSecondary,
-              borderColor: activeTab === 'details' ? C.primary : 'transparent',
+              backgroundColor: C.primary,
+              color: C.bg,
+              borderColor: C.primary,
               borderWidth: '1px',
               borderStyle: 'solid',
             }}
           >
             Details & AI Investigation
-          </button>
-          <button
-            onClick={() => setActiveTab('ask_ai')}
-            className={`px-4 py-1.5 text-[13px] font-medium rounded-full transition-colors flex items-center gap-2`}
-            style={{
-              backgroundColor: activeTab === 'ask_ai' ? C.primary : 'transparent',
-              color: activeTab === 'ask_ai' ? C.bg : C.textSecondary,
-              borderColor: activeTab === 'ask_ai' ? C.primary : 'transparent',
-              borderWidth: '1px',
-              borderStyle: 'solid',
-            }}
-          >
-            <Bot className="w-4 h-4" /> Ask AI
           </button>
         </div>
 
@@ -212,7 +156,7 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
             <div className="flex items-center justify-center h-32">
               <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
             </div>
-          ) : !exc ? null : activeTab === 'details' ? (
+          ) : !exc ? null : (
             <div className="space-y-6 animate-fade-in">
               {/* Core Details */}
               <div className="grid grid-cols-2 gap-4">
@@ -256,72 +200,15 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
                 {exc.description && (
                   <div className="mt-4 pt-4 border-t" style={{ borderColor: C.border }}>
                     <h3 className="text-[12px] font-semibold uppercase tracking-wide mb-2" style={{ color: C.textMuted }}>Description / Raw details</h3>
-                    <PlainText text={exc.description} className="text-[12px] text-gray-600 bg-gray-50 p-2 rounded border font-mono break-all" />
+                    <PlainText text={exc.description} className="text-[12px] p-2 rounded border font-mono break-all" style={{ color: C.textSecondary, backgroundColor: C.neutralTint, borderColor: C.border }} />
                   </div>
                 )}
               </div>
 
-              {/* AI Investigation Popover */}
-              <div className="card border-l-4 overflow-hidden" style={{ borderLeftColor: C.primary, borderColor: C.border }}>
-                <div className="p-4 bg-surface flex items-center justify-between border-b" style={{ borderColor: C.border }}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: C.primaryTint, color: C.primary }}>
-                      <Zap className="w-3.5 h-3.5" />
-                    </div>
-                    <h3 className="text-[13px] font-semibold" style={{ color: C.textPrimary }}>AI Investigation</h3>
-                  </div>
-                  <button onClick={investigate} disabled={investigating} className="btn-secondary text-[11px] py-1 px-2.5 h-auto min-h-0">
-                    {investigating ? <><Loader2 className="w-3 h-3 animate-spin" /> Investigating…</> : analysis ? 'Re-investigate' : 'Investigate with AI'}
-                  </button>
-                </div>
-                
-                <div className="p-4 bg-white">
-                  {investigationError && (
-                    <div className="p-3 mb-4 rounded bg-red-50 text-red-600 text-[12px] border border-red-100">
-                      {investigationError}
-                    </div>
-                  )}
-
-                  {!analysis ? (
-                    <div className="text-center py-6 text-[13px]" style={{ color: C.textMuted }}>
-                      Click "Investigate with AI" to generate a root cause analysis and action plan.
-                    </div>
-                  ) : (
-                    <div className="space-y-4 animate-slide-up">
-                      {analysis.toolCalls && analysis.toolCalls.length > 0 && (
-                        <div>
-                          <p className="text-[11px] uppercase tracking-wide mb-1" style={{ color: C.textMuted }}>Tools Used</p>
-                          <div className="flex flex-wrap gap-2">
-                            {analysis.toolCalls.map((tc, idx) => (
-                              <div key={idx} className="px-2 py-1 bg-gray-100 rounded text-[11px] font-mono text-gray-700 border" style={{ borderColor: C.border }}>
-                                {tc.tool}(...)
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wide mb-1" style={{ color: C.textMuted }}>Summary</p>
-                        <PlainText text={analysis.summary} className="text-[13px] leading-relaxed" style={{ color: C.textPrimary }} />
-                      </div>
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wide mb-1" style={{ color: C.textMuted }}>Likely Cause</p>
-                        <PlainText text={analysis.likelyCause} className="text-[13px]" style={{ color: C.textPrimary }} />
-                      </div>
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wide mb-2" style={{ color: C.textMuted }}>Confidence</p>
-                        <Confidence value={analysis.confidence} />
-                      </div>
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wide mb-1" style={{ color: C.textMuted }}>Recommended Action</p>
-                        <div className="inline-block px-2.5 py-1 text-[12px] font-semibold border rounded-md" style={{ backgroundColor: C.infoTint, borderColor: `${C.info}40`, color: C.info }}>
-                          <PlainText text={analysis.recommendedAction} />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              <div className="mt-6 pt-6 border-t" style={{ borderColor: C.border }}>
+                <AiChatThread exceptionId={id} initialAnalysis={exc.aiAnalyses?.[0]} />
               </div>
+
 
               {/* Actions */}
               {exc.status !== 'RESOLVED' && (
@@ -345,62 +232,6 @@ export function ExceptionDrawer({ id, onClose }: { id: string, onClose: () => vo
                   )}
                 </div>
               )}
-            </div>
-          ) : (
-            <div className="flex flex-col h-full animate-fade-in">
-              <div className="flex-1 space-y-6 pb-6">
-                {messages.map(msg =>
-                  msg.role === 'user' ? (
-                    <div key={msg.id} className="flex justify-end gap-3">
-                      <div className="px-4 py-2.5 rounded-2xl rounded-tr-sm text-[13px] leading-relaxed shadow-sm max-w-[85%]" style={{ backgroundColor: C.primary, color: C.bg }}>
-                        <PlainText text={msg.content} />
-                      </div>
-                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: C.neutralTint, color: C.textPrimary }}>
-                        <User className="w-3.5 h-3.5" />
-                      </div>
-                    </div>
-                  ) : (
-                    <div key={msg.id} className="flex gap-3">
-                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: C.primary, color: C.bg }}>
-                        <Bot className="w-3.5 h-3.5" />
-                      </div>
-                      {msg.loading ? (
-                        <div className="px-4 py-3 rounded-2xl rounded-tl-sm border flex items-center gap-1.5" style={{ backgroundColor: C.surface, borderColor: C.border }}>
-                          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: C.primary, animationDelay: '0ms' }} />
-                          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: C.primary, animationDelay: '150ms' }} />
-                          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: C.primary, animationDelay: '300ms' }} />
-                        </div>
-                      ) : (
-                        <div className="px-4 py-2.5 rounded-2xl rounded-tl-sm border text-[13px] leading-relaxed max-w-[85%]" style={{ backgroundColor: C.surface, borderColor: C.border, color: C.textPrimary }}>
-                          <PlainText text={msg.content} />
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
-                <div ref={bottomRef} />
-              </div>
-              <div className="shrink-0 mt-auto pt-4 border-t" style={{ borderColor: C.border }}>
-                <div className="relative flex items-center gap-2 rounded-lg border p-1.5 focus-within:ring-2 bg-surface transition-shadow" style={{ borderColor: C.border, '--tw-ring-color': `${C.primary}40` } as React.CSSProperties}>
-                  <input
-                    type="text"
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && send()}
-                    placeholder="Ask LedgerMind AI..."
-                    className="flex-1 bg-transparent outline-none py-1.5 px-2 text-[13px]"
-                    style={{ color: C.textPrimary }}
-                  />
-                  <button
-                    onClick={() => send()}
-                    disabled={!input.trim() || sending}
-                    className="w-8 h-8 rounded flex items-center justify-center shrink-0 disabled:opacity-50 transition-colors"
-                    style={{ backgroundColor: C.primary, color: C.bg }}
-                  >
-                    {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5 ml-0.5" />}
-                  </button>
-                </div>
-              </div>
             </div>
           )}
         </div>

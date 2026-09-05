@@ -1,6 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
-import { Severity, ReconciliationRunStatus, MatchEntityType, MatchMethod, ExceptionType, ImpactLevel } from '@prisma/client';
+import { Severity, ReconciliationRunStatus, MatchEntityType, MatchMethod, ExceptionType, ImpactLevel, ExceptionStatus, Order, Payment, Refund, Settlement, BankTransaction } from '@prisma/client';
+
+export interface ExceptionDraft {
+  type: ExceptionType;
+  merchantId: string;
+  status: ExceptionStatus;
+  expectedAmount: bigint;
+  actualAmount: bigint;
+  differenceAmount: bigint;
+  financialImpact: bigint;
+  customerImpact: ImpactLevel;
+  dedupKey: string;
+  primaryEntityType: string;
+  primaryEntityId: string;
+}
+
+export interface MatchDraft {
+  sourceType: MatchEntityType;
+  sourceId: string;
+  targetType: MatchEntityType;
+  targetId: string;
+  matchScore: number;
+  matchMethod: MatchMethod;
+}
 
 export interface RunReconciliationArgs {
   merchantId: string;
@@ -23,7 +46,7 @@ export class ReconciliationService {
   async runReconciliation(args: RunReconciliationArgs) {
     const { merchantId, dateFrom, dateTo } = args;
 
-    const dateFilter: any = {};
+    const dateFilter: Record<string, Date> = {};
     if (dateFrom) dateFilter['gte'] = new Date(dateFrom);
     if (dateTo) dateFilter['lte'] = new Date(dateTo);
     const dateCondition = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
@@ -37,8 +60,8 @@ export class ReconciliationService {
       this.prisma.bankTransaction.findMany({ where: { merchantId, ...dateCondition } }),
     ]);
 
-    const exceptionsToUpsert: any[] = [];
-    const matchesToCreate: any[] = [];
+    const exceptionsToUpsert: ExceptionDraft[] = [];
+    const matchesToCreate: MatchDraft[] = [];
 
     // 2. Apply Rules & Collect Matches
     this.checkOrderPayment(orders, payments, exceptionsToUpsert, matchesToCreate, merchantId);
@@ -165,7 +188,7 @@ export class ReconciliationService {
 
   // --- Rule Hierarchy Implementations ---
   
-  private checkOrderPayment(orders: any[], payments: any[], exceptions: any[], matches: any[], merchantId: string) {
+  private checkOrderPayment(orders: Order[], payments: Payment[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
     for (const order of orders) {
       if (order.status !== 'PAID') continue;
 
@@ -232,7 +255,7 @@ export class ReconciliationService {
     }
   }
 
-  private checkPaymentSettlement(payments: any[], settlements: any[], exceptions: any[], matches: any[], merchantId: string) {
+  private checkPaymentSettlement(payments: Payment[], settlements: Settlement[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
     const captured = payments.filter((p) => p.status === 'CAPTURED');
     const availableSettlements = new Set(settlements.map((s) => s.id));
 
@@ -272,7 +295,7 @@ export class ReconciliationService {
     }
   }
 
-  private checkSettlementBank(settlements: any[], bankTransactions: any[], exceptions: any[], matches: any[], merchantId: string) {
+  private checkSettlementBank(settlements: Settlement[], bankTransactions: BankTransaction[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
     const availableBankTxns = new Set(bankTransactions.map(b => b.id));
 
     for (const s of settlements) {
@@ -335,7 +358,7 @@ export class ReconciliationService {
     }
   }
 
-  private checkRefundDelay(refunds: any[], exceptions: any[], merchantId: string) {
+  private checkRefundDelay(refunds: Refund[], exceptions: ExceptionDraft[], merchantId: string) {
     const now = new Date();
     for (const r of refunds) {
       if (r.status === 'PROCESSING') {
@@ -367,9 +390,9 @@ export class ReconciliationService {
    * payment-state inconsistency between the gateway and the bank.
    */
   private checkBankPaymentMismatch(
-    payments: any[],
-    bankTransactions: any[],
-    exceptions: any[],
+    payments: Payment[],
+    bankTransactions: BankTransaction[],
+    exceptions: ExceptionDraft[],
     merchantId: string,
   ) {
     const failedPayments = payments.filter((p) => p.status === 'FAILED');

@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { Search } from 'lucide-react';
+import { Search, Sun, Moon, Monitor } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { C } from '../../lib/tokens';
 import { LiveIndicator } from '../ui/LiveIndicator';
 
@@ -13,8 +14,8 @@ interface HeaderProps {
 export function Header({ title, action }: HeaderProps) {
   return (
     <header 
-      className="flex items-center justify-between px-8 h-[64px] shrink-0 sticky top-0 z-10"
-      style={{ backgroundColor: C.surface, borderBottom: `1px solid ${C.border}` }}
+      className="flex items-center justify-between px-8 h-[64px] shrink-0 sticky top-0 z-10 backdrop-blur-xl"
+      style={{ backgroundColor: `${C.surface}E6`, borderBottom: `1px solid ${C.border}` }}
     >
       <div className="flex items-center gap-6 flex-1">
         <h1 
@@ -48,11 +49,42 @@ export function Header({ title, action }: HeaderProps) {
         <LiveIndicator />
       </div>
 
-      {action && (
-        <div className="flex items-center gap-3">
-          {action}
-        </div>
-      )}
+      <div className="flex items-center gap-3">
+        {action}
+        <ThemeToggle />
+      </div>
     </header>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return <div className="w-8 h-8" />; // Placeholder to prevent layout shift
+  }
+
+  const toggleTheme = () => {
+    if (theme === 'system') setTheme('dark');
+    else if (theme === 'dark') setTheme('light');
+    else setTheme('system');
+  };
+
+  const Icon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
+
+  return (
+    <button
+      onClick={toggleTheme}
+      className="flex items-center justify-center w-8 h-8 rounded-lg hover-bg-muted"
+      style={{ color: C.textSecondary }}
+      title={`Current theme: ${theme}. Click to switch.`}
+    >
+      <Icon className="w-4 h-4" />
+    </button>
   );
 }

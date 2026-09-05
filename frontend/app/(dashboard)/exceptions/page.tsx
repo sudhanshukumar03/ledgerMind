@@ -1,17 +1,19 @@
 'use client';
 
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useEffect, useState, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { exceptionsApi, Exception } from '../../../lib/api-client';
 import { Header } from '../../../components/layout/Header';
 import { ExceptionDrawer } from '../../../components/exceptions/ExceptionDrawer';
+import { QuickInvestigatePopover } from '../../../components/exceptions/QuickInvestigatePopover';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Amount } from '../../../components/ui/Amount';
 import { Pagination } from '../../../components/ui/Pagination';
 import { FilterBar } from '../../../components/ui/FilterBar';
+import { Skeleton } from '../../../components/ui/Skeleton';
 import { C } from '../../../lib/tokens';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Search, Zap } from 'lucide-react';
 import useSWR from 'swr';
 
 function ExceptionsList() {
@@ -23,6 +25,15 @@ function ExceptionsList() {
   const statusFilter = searchParams.get('status') ?? 'OPEN';
   const severityFilter = searchParams.get('severity') ?? '';
   const search = searchParams.get('search') ?? '';
+
+  const [popover, setPopover] = useState<{ open: boolean; anchorEl: HTMLElement | null; exception: Exception | null }>({
+    open: false,
+    anchorEl: null,
+    exception: null
+  });
+
+  // Track which row opened the drawer so we can return focus on close
+  const drawerTriggerRef = useRef<HTMLElement>(null);
 
   const updateFilters = (updates: { status?: string, severity?: string, search?: string, page?: number }) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -65,11 +76,40 @@ function ExceptionsList() {
     e.type.toLowerCase().includes(search.toLowerCase())
   );
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 'i') {
+        e.preventDefault();
+        
+        // Find hovered row or fallback to first row
+        let row = document.querySelector('tr:hover') as HTMLElement;
+        if (!row) {
+          row = document.querySelector('tr[data-exception-id]') as HTMLElement;
+        }
+
+        if (row) {
+          const excId = row.getAttribute('data-exception-id');
+          const exc = filtered.find(x => x.id === excId);
+          if (exc) {
+            const btn = row.querySelector('.investigate-btn') as HTMLElement;
+            setPopover({ open: true, anchorEl: btn || row, exception: exc });
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [filtered]);
+
   return (
-    <div className="flex flex-col h-full bg-bg">
+    <div className="flex flex-col h-full bg-bg relative">
       <Header title="Exceptions" />
 
-      <div className="flex-1 overflow-auto p-8 flex flex-col gap-6 max-w-[1200px] w-full mx-auto">
+      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
         
         {/* Search */}
         <div className="flex flex-wrap items-center gap-4">
@@ -104,16 +144,21 @@ function ExceptionsList() {
                   <th className="px-4 py-3 text-[11px] font-bold tracking-wider uppercase whitespace-nowrap" style={{ color: C.textMuted }}>Severity</th>
                   <th className="px-4 py-3 text-[11px] font-bold tracking-wider uppercase whitespace-nowrap" style={{ color: C.textMuted }}>Status</th>
                   <th className="px-4 py-3 text-[11px] font-bold tracking-wider uppercase whitespace-nowrap text-right" style={{ color: C.textMuted }}>Exposure</th>
-                  <th className="px-4 py-3 text-[11px] font-bold tracking-wider uppercase whitespace-nowrap" style={{ color: C.textMuted }}>Created</th>
+                  <th className="px-4 py-3 text-[11px] font-bold tracking-wider uppercase whitespace-nowrap text-right" style={{ color: C.textMuted }}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: C.border }}>
                 {loading ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-12">
-                      <Loader2 className="w-5 h-5 animate-spin mx-auto" style={{ color: C.primary }}/>
-                    </td>
-                  </tr>
+                  Array.from({ length: 4 }).map((_, i) => (
+                    <tr key={`skeleton-${i}`}>
+                      <td className="px-4 py-3"><Skeleton className="h-6 w-full" /></td>
+                      <td className="px-4 py-3"><Skeleton className="h-6 w-3/4" /></td>
+                      <td className="px-4 py-3"><Skeleton className="h-6 w-1/2" /></td>
+                      <td className="px-4 py-3"><Skeleton className="h-6 w-1/2" /></td>
+                      <td className="px-4 py-3 text-right"><Skeleton className="h-6 w-20 ml-auto" /></td>
+                      <td className="px-4 py-3 text-right"><Skeleton className="h-8 w-8 ml-auto" /></td>
+                    </tr>
+                  ))
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-12 text-[13px]" style={{ color: C.textMuted }}>
@@ -124,15 +169,40 @@ function ExceptionsList() {
                   filtered.map(exc => (
                     <tr
                       key={exc.id}
-                      className="hover:bg-gray-50 transition-colors cursor-pointer group"
-                      onClick={() => router.push(`/exceptions?exception=${exc.id}`)}
+                      tabIndex={0}
+                      data-exception-id={exc.id}
+                      className="table-row-hover group"
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('.investigate-btn')) return;
+                        (drawerTriggerRef as any).current = e.currentTarget;
+                        router.push(`/exceptions?exception=${exc.id}`);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          (drawerTriggerRef as any).current = e.currentTarget;
+                          router.push(`/exceptions?exception=${exc.id}`);
+                        }
+                      }}
                     >
                       <td className="px-4 py-3 text-[13px] font-mono" style={{ color: C.textSecondary }}>{exc.exceptionId}</td>
                       <td className="px-4 py-3 text-[13px] font-medium" style={{ color: C.textPrimary }}>{exc.type.replace(/_/g, ' ')}</td>
                       <td className="px-4 py-3"><StatusBadge severity={exc.severity} /></td>
                       <td className="px-4 py-3"><StatusBadge status={exc.status} /></td>
                       <td className="px-4 py-3 text-[14px] font-semibold text-right" style={{ color: C.textPrimary }}><Amount value={exc.financialImpact} /></td>
-                      <td className="px-4 py-3 text-[13px]" style={{ color: C.textSecondary }}>{new Date(exc.createdAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button 
+                          className="investigate-btn opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md border flex items-center justify-center shadow-sm hover-bg-muted ml-auto"
+                          style={{ backgroundColor: C.surface, borderColor: C.border }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPopover({ open: true, anchorEl: e.currentTarget, exception: exc });
+                          }}
+                          title="Investigate with AI (Cmd+I)"
+                        >
+                          <Zap className="w-4 h-4" style={{ color: C.primary }} />
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -148,7 +218,13 @@ function ExceptionsList() {
                 isLoading={loading} 
               />
             ) : (
-              <div className="px-4 py-3 border-t text-[12px]" style={{ borderColor: C.border, color: C.textMuted }}>
+              <div
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className="px-4 py-3 border-t text-[12px]"
+                style={{ borderColor: C.border, color: C.textMuted }}
+              >
                 {filtered.length} exception{filtered.length !== 1 ? 's' : ''}
               </div>
             )}
@@ -157,15 +233,22 @@ function ExceptionsList() {
 
       </div>
       {activeExceptionId && (
-        <ExceptionDrawer 
-          id={activeExceptionId} 
+        <ExceptionDrawer
+          id={activeExceptionId}
+          triggerRef={drawerTriggerRef as React.RefObject<HTMLElement>}
           onClose={() => {
             const params = new URLSearchParams(searchParams.toString());
             params.delete('exception');
             router.push(`/exceptions?${params.toString()}`);
-          }} 
+          }}
         />
       )}
+      <QuickInvestigatePopover
+        open={popover.open}
+        anchorEl={popover.anchorEl}
+        exception={popover.exception}
+        onClose={() => setPopover({ ...popover, open: false })}
+      />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
-import OpenAI from 'openai';
+import { Prisma, Severity } from '@prisma/client';
 import { z } from 'zod';
+import { GoogleGenAI, Type } from '@google/genai';
 
 const AiAnalysisSchema = z.object({
   summary: z.string().optional().default('No summary'),
@@ -15,7 +16,7 @@ const AiAnalysisSchema = z.object({
 // ─── Tool definitions (per docs/08-AI-AGENT-SPECIFICATION.md) ────────────────
 // All tools are READ-ONLY. The AI is NOT a source of financial truth and must
 // never mutate records directly. Mutations go through the Action Engine.
-const AI_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+const AI_TOOLS = [
   {
     type: 'function',
     function: {
@@ -199,6 +200,37 @@ const AI_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
   },
 ];
 
+// ─── Gemini Tool Mapping ──────────────────────────────────────────────────
+const GEMINI_TOOLS = [{
+  functionDeclarations: AI_TOOLS.map(t => {
+    const fn = (t as Record<string, unknown>).function as Record<string, unknown>;
+    const properties: Record<string, unknown> = {};
+    const params = fn.parameters as Record<string, unknown>;
+    if (params && params.properties) {
+      for (const [key, val] of Object.entries(params.properties as Record<string, unknown>)) {
+        const v = val as Record<string, unknown>;
+        properties[key] = {
+          type: v.type === 'string' ? Type.STRING :
+                v.type === 'number' ? Type.NUMBER :
+                v.type === 'boolean' ? Type.BOOLEAN :
+                v.type === 'array' ? Type.ARRAY : Type.STRING,
+          description: v.description,
+          enum: v.enum,
+        };
+      }
+    }
+    return {
+      name: fn.name,
+      description: fn.description,
+      parameters: params ? {
+        type: Type.OBJECT,
+        properties: Object.keys(properties).length > 0 ? properties : undefined,
+        required: params.required || undefined,
+      } : undefined
+    };
+  })
+}];
+
 const SYSTEM_PROMPT = `You are LedgerMind's AI Finance Controller. Your role is to:
 - Investigate reconciliation exceptions and explain discrepancies in plain English
 - Answer finance queries using real transaction data from the tools available to you
@@ -216,11 +248,14 @@ CRITICAL CONSTRAINTS:
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private openai: OpenAI;
+  private gemini: GoogleGenAI;
 
   constructor(private readonly prisma: PrismaService) {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || '',
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY is not set');
+    }
+    this.gemini = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
     });
   }
 
@@ -228,9 +263,9 @@ export class AiService {
 
   private async dispatchTool(
     name: string,
-    args: Record<string, any>,
+    args: Record<string, unknown>,
     merchantId: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     switch (name) {
       case 'get_transaction': {
         // Try payment first, then order
@@ -298,7 +333,7 @@ export class AiService {
       }
 
       case 'get_customer_history': {
-        const limit = Math.min(args.limit ?? 10, 100);
+        const limit = Math.min((args.limit as number) ?? 10, 100);
         const [orders, payments] = await Promise.all([
           this.prisma.order.findMany({ where: { merchantId, customerId: args.customer_id }, take: limit, orderBy: { createdAt: 'desc' } }),
           this.prisma.payment.findMany({ 
@@ -311,7 +346,7 @@ export class AiService {
       }
 
       case 'get_merchant_history': {
-        const limit = Math.min(args.limit ?? 10, 100);
+        const limit = Math.min((args.limit as number) ?? 10, 100);
         const [exceptions, runs] = await Promise.all([
           this.prisma.exception.findMany({ where: { merchantId }, take: limit, orderBy: { createdAt: 'desc' } }),
           this.prisma.reconciliationRun.findMany({ where: { merchantId }, take: limit, orderBy: { startedAt: 'desc' } }),
@@ -349,12 +384,23 @@ export class AiService {
         };
       }
 
-      case 'list_open_exceptions': {
-        const where: any = { merchantId: args.merchant_id, status: 'OPEN' };
-        if (args.severity) where.severity = args.severity;
+      case 'get_dashboard_stats': {
+        const where: Prisma.ExceptionWhereInput = { merchantId: args.merchant_id as string, status: 'OPEN' };
+        if (args.severity) where.severity = args.severity as Severity;
         const exceptions = await this.prisma.exception.findMany({
           where,
-          take: Math.min(args.limit ?? 20, 100),
+          take: Math.min((args.limit as number) ?? 20, 100),
+          orderBy: [{ severity: 'asc' }, { createdAt: 'asc' }],
+        });
+        return this.safe(exceptions);
+      }
+
+      case 'list_open_exceptions': {
+        const where: Prisma.ExceptionWhereInput = { merchantId: args.merchant_id as string, status: 'OPEN' };
+        if (args.severity) where.severity = args.severity as Severity;
+        const exceptions = await this.prisma.exception.findMany({
+          where,
+          take: Math.min((args.limit as number) ?? 20, 100),
           orderBy: [{ severity: 'asc' }, { createdAt: 'asc' }],
         });
         return this.safe(exceptions);
@@ -362,7 +408,7 @@ export class AiService {
 
       case 'get_reconciliation_run': {
         const run = await this.prisma.reconciliationRun.findFirst({
-          where: { id: args.run_id, merchantId },
+          where: { id: args.run_id as string, merchantId },
           include: { exceptions: { take: 5 } },
         });
         return this.safe(run) ?? { error: 'Run not found' };
@@ -392,7 +438,7 @@ export class AiService {
     });
     if (!exception) throw new NotFoundException('Exception not found');
 
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    const messages: { role: string; content: string }[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       {
         role: 'user',
@@ -424,17 +470,17 @@ export class AiService {
         recommendedAction: analysisResult.recommended_action ?? 'MANUAL_REVIEW',
         evidenceChain: analysisResult.evidence_chain ?? [],
         nextSteps: analysisResult.next_steps ?? [],
-        model: 'gpt-4o',
+        model: process.env.AI_MODEL || 'gemini-3.6-flash',
         promptVersion: '2.0',
-        toolCalls: toolCallLog,
+        toolCalls: toolCallLog as Prisma.InputJsonValue[],
       },
     });
 
     return { analysis_id: saved.id, ...analysisResult };
   }
 
-  async chat(userMessages: OpenAI.Chat.ChatCompletionMessageParam[], merchantId: string) {
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+  async chat(userMessages: { role: string; content: string }[], merchantId: string) {
+    const messages: { role: string; content: string }[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       ...userMessages,
     ];
@@ -444,78 +490,138 @@ export class AiService {
     return {
       message: finalMessage.content,
       tool_calls_made: toolCallLog.length,
+      tool_calls: toolCallLog,
       suggested_actions: this.extractSuggestedActions(finalMessage.content as string),
     };
   }
 
   // ─── Core tool loop ───────────────────────────────────────────────────────
 
-  private async runToolLoop(
-    messages: OpenAI.Chat.ChatCompletionMessageParam[],
-    merchantId: string,
-    maxRounds = 6,
-  ): Promise<{ finalMessage: OpenAI.Chat.ChatCompletionMessage; toolCallLog: any[] }> {
-    const toolCallLog: any[] = [];
+  private mapMessagesToGemini(messages: { role: string; content?: string }[]) {
+    const contents: unknown[] = [];
+    let systemInstruction = SYSTEM_PROMPT;
 
-    for (let round = 0; round < maxRounds; round++) {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages,
-        tools: AI_TOOLS,
-        tool_choice: 'auto',
-        response_format: { type: 'json_object' },
-      });
-
-      const msg = response.choices[0].message;
-      messages.push(msg);
-
-      if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        return { finalMessage: msg, toolCallLog };
-      }
-
-      // Execute all tool calls sequentially to handle parse errors safely
-      const functionCalls = msg.tool_calls.filter(
-        (tc): tc is OpenAI.Chat.ChatCompletionMessageToolCall & { function: { name: string; arguments: string } } =>
-          tc.type === 'function',
-      );
-
-      const results = [];
-      for (const tc of functionCalls) {
-        let args;
-        let result;
-        try {
-          args = JSON.parse(tc.function.arguments);
-          result = await this.dispatchTool(tc.function.name, args, merchantId);
-        } catch (e: any) {
-          args = { raw: tc.function.arguments };
-          result = { error: `Failed to parse arguments or execute tool: ${e.message}` };
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemInstruction = msg.content as string;
+      } else if (msg.role === 'user') {
+        contents.push({ role: 'user', parts: [{ text: msg.content as string }] });
+      } else if (msg.role === 'assistant') {
+        if (msg.content) {
+          contents.push({ role: 'model', parts: [{ text: msg.content as string }] });
         }
-        toolCallLog.push({ tool: tc.function.name, args, result });
-        results.push({ tc, result });
-      }
-
-      for (const { tc, result } of results) {
-        messages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: JSON.stringify(result),
-        });
       }
     }
+    return { contents, systemInstruction };
+  }
 
-    // Fallback: force a final non-tool response
-    const fallback = await this.openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages,
-      response_format: { type: 'json_object' },
-    });
-    return { finalMessage: fallback.choices[0].message, toolCallLog };
+  private async runToolLoop(
+    messages: { role: string; content?: string }[],
+    merchantId: string,
+    maxRounds = 6,
+  ): Promise<{ finalMessage: { content: unknown }; toolCallLog: unknown[] }> {
+    this.logger.log('Starting Gemini investigation loop');
+    const toolCallLog: unknown[] = [];
+    const { contents, systemInstruction } = this.mapMessagesToGemini(messages);
+
+    for (let round = 0; round < maxRounds; round++) {
+      let response;
+      try {
+        response = await this.gemini.models.generateContent({
+          model: process.env.AI_MODEL || 'gemini-3.6-flash',
+          contents: contents as any[],
+          config: {
+            tools: GEMINI_TOOLS as any,
+            systemInstruction,
+            responseMimeType: 'application/json',
+          }
+        });
+      } catch (err: unknown) {
+        this.logger.error(`Gemini API failed during tool loop: ${(err as Error).message}`);
+        return { 
+          finalMessage: { content: '{"summary":"I am currently experiencing technical difficulties connecting to the AI provider. Please try again later.","likely_cause":"AI Service Unavailable"}' }, 
+          toolCallLog 
+        };
+      }
+
+      const fnCalls = response.functionCalls;
+      if (!fnCalls || fnCalls.length === 0) {
+        return { 
+          finalMessage: { content: response.text ?? '{}' }, 
+          toolCallLog 
+        };
+      }
+
+      // Add the full model response to contents history (preserves thought_signatures)
+      const modelContent = response.candidates?.[0]?.content;
+      if (modelContent) {
+        contents.push(modelContent);
+      } else {
+        contents.push({
+          role: 'model',
+          parts: fnCalls.map(tc => ({ functionCall: { name: tc.name, args: tc.args } }))
+        });
+      }
+
+      const functionResponses = [];
+
+      for (const tc of fnCalls) {
+        const args = tc.args as Record<string, unknown>;
+        let result: unknown;
+        try {
+          result = await this.dispatchTool(tc.name, args, merchantId);
+        } catch (e: unknown) {
+          result = { error: `Failed to execute tool: ${(e as Error).message}` };
+        }
+        toolCallLog.push({ tool: tc.name, args, result });
+        
+        // Gemini requires the response to be a JSON object (protobuf Struct), not an array or primitive
+        const safeResponse = (Array.isArray(result) || typeof result !== 'object' || result === null)
+          ? { data: result } 
+          : result;
+
+        functionResponses.push({
+          functionResponse: { name: tc.name, response: safeResponse }
+        });
+      }
+
+      // Add the function responses back to contents history
+      contents.push({
+        role: 'user',
+        parts: functionResponses
+      });
+    }
+
+    // Fallback: force a final non-tool response if max rounds hit
+    let fallback;
+    try {
+      fallback = await this.gemini.models.generateContent({
+        model: process.env.AI_MODEL || 'gemini-3.6-flash',
+        contents: contents as any[],
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+        }
+      });
+    } catch (err: unknown) {
+      this.logger.error(`Gemini API failed during fallback: ${(err as Error).message}`);
+      return { 
+        finalMessage: { content: '{"summary":"I am currently experiencing technical difficulties connecting to the AI provider. Please try again later.","likely_cause":"AI Service Unavailable"}' }, 
+        toolCallLog 
+      };
+    }
+
+    return { 
+      finalMessage: { content: fallback.text ?? '{}' }, 
+      toolCallLog 
+    };
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   /** Serialize BigInt fields to strings so they survive JSON.stringify. */
-  private safe(obj: any): any {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private safe(obj: unknown): unknown {
     if (obj === null || obj === undefined) return obj;
     return JSON.parse(
       JSON.stringify(obj, (_key, value) =>
@@ -524,7 +630,7 @@ export class AiService {
     );
   }
 
-  private suggestActions(exc: any): string[] {
+  private suggestActions(exc: { type: string }): string[] {
     const suggestions: string[] = [];
     switch (exc.type) {
       case 'PAYMENT_MISSING':

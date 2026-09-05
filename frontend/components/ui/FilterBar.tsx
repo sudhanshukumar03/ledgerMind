@@ -59,7 +59,7 @@ export function FilterBar({ filters, onFilterChange, onClearAll }: FilterBarProp
       ))}
 
       {/* Divider */}
-      <span className="w-px h-6 bg-gray-200 mx-2" />
+      <span className="w-px h-6 mx-2" style={{ backgroundColor: C.border }} />
 
       {/* Status group */}
       <span className="text-xs font-semibold uppercase tracking-wider text-gray-400 mr-1">

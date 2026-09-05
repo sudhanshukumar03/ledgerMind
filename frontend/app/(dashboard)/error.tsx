@@ -17,7 +17,7 @@ export default function ErrorBoundary({
   }, [error]);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8 text-center animate-slide-up">
+    <div className="flex flex-col items-center justify-center h-full p-6 md:p-10 text-center animate-slide-up">
       <AlertTriangle className="w-12 h-12 mb-4" style={{ color: C.warning }} />
       <h2 className="text-lg font-bold mb-2" style={{ color: C.textPrimary }}>Something went wrong!</h2>
       <p className="text-sm mb-6 max-w-md" style={{ color: C.textSecondary }}>

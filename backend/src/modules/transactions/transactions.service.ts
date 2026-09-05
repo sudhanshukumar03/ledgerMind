@@ -11,16 +11,17 @@ export class TransactionsService {
     const skip = (Number(page) - 1) * Number(limit);
     const take = Number(limit);
 
-    const where: any = { merchantId };
+    const where: Record<string, unknown> = { merchantId };
     
     if (status) where.status = status;
     if (from || to) {
-      where.createdAt = {};
-      if (from) where.createdAt.gte = new Date(from);
-      if (to) where.createdAt.lte = new Date(to);
+      const createdAt: { gte?: Date; lte?: Date } = {};
+      if (from) createdAt.gte = new Date(from);
+      if (to) createdAt.lte = new Date(to);
+      where.createdAt = createdAt;
     }
 
-    let data: any[] = [];
+    let data: unknown[] = [];
     let total = 0;
 
     switch (type) {
@@ -155,15 +156,15 @@ export class TransactionsService {
     throw new NotFoundException('Transaction not found');
   }
 
-  private serializeBigInt(obj: any): any {
+  private serializeBigInt(obj: unknown): unknown {
     if (obj === null || obj === undefined) return obj;
     if (typeof obj === 'bigint') return obj.toString();
     if (Array.isArray(obj)) return obj.map(item => this.serializeBigInt(item));
     if (typeof obj === 'object') {
-      const result: any = {};
-      for (const key in obj) {
+      const result: Record<string, unknown> = {};
+      for (const key in obj as Record<string, unknown>) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
-          result[key] = this.serializeBigInt(obj[key]);
+          result[key] = this.serializeBigInt((obj as Record<string, unknown>)[key]);
         }
       }
       return result;

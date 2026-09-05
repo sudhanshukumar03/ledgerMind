@@ -68,8 +68,8 @@ _(Note: expand this into a sequence diagram once the NestJS module boundaries ar
 
 ## Model Selection
 
-- Primary model: **OpenAI GPT-4o**, with function calling enabled (with optional fallback to Gemini if the OpenAI API is unavailable).
-- The tool definitions are provided as JSON schemas to the OpenAI API.
+- Primary model: **Google Gemini 3.6 Flash** (or higher), with function calling enabled.
+- The tool definitions are provided as Function Declarations to the Gemini API.
 - The backend parses the function call requests and executes the corresponding NestJS service methods.
 - Responses are formatted as JSON for the frontend.
 

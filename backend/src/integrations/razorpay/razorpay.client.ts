@@ -4,24 +4,35 @@ import Razorpay from 'razorpay';
 @Injectable()
 export class RazorpayClient {
     private readonly logger = new Logger(RazorpayClient.name);
-    private readonly client: Razorpay;
+    private readonly client: Razorpay | null;
 
     constructor() {
         const keyId = process.env.RAZORPAY_KEY_ID;
         const keySecret = process.env.RAZORPAY_KEY_SECRET;
         if (!keyId || !keySecret) {
-            throw new Error('FATAL: RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set');
+            this.logger.warn(
+                'RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET not set — ' +
+                'Razorpay actions are disabled. Set keys to enable payment execution.',
+            );
+            this.client = null;
+        } else {
+            this.client = new Razorpay({ key_id: keyId, key_secret: keySecret });
         }
-        this.client = new Razorpay({
-            key_id: keyId,
-            key_secret: keySecret,
-        });
+    }
+
+    private getClient(): Razorpay {
+        if (!this.client) {
+            throw new Error(
+                'Razorpay is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env',
+            );
+        }
+        return this.client;
     }
 
     // Create a refund (only called after policy + approval)
     async createRefund(paymentId: string, amountInPaise?: number) {
         try {
-            const refund = await this.client.payments.refund(paymentId, {
+            const refund = await this.getClient().payments.refund(paymentId, {
                 amount: amountInPaise,
             });
             return refund;
@@ -34,7 +45,7 @@ export class RazorpayClient {
     // Create a payment link (for collecting money)
     async createPaymentLink(orderId: string, amountInPaise: number) {
         try {
-            const link = await this.client.paymentLink.create({
+            const link = await this.getClient().paymentLink.create({
                 amount: amountInPaise,
                 currency: 'INR',
                 reference_id: orderId,

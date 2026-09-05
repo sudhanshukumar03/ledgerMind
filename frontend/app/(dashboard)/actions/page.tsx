@@ -25,10 +25,10 @@ function ActionRow({ action, onReview, canApprove }: {
 }) {
   const isPending = action.status === 'PENDING_APPROVAL' || action.status === 'PROPOSED';
   return (
-    <tr className="hover:bg-gray-50 transition-colors">
+    <tr className="table-row-hover">
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center shrink-0" style={{ color: C.textSecondary }}>
+          <div className="w-8 h-8 rounded flex items-center justify-center shrink-0" style={{ color: C.textSecondary, backgroundColor: C.neutralTint }}>
             {TYPE_ICONS[action.type] ?? <span className="text-sm font-bold">•</span>}
           </div>
           <div className="min-w-0">
@@ -102,7 +102,7 @@ export default function ActionsPage() {
         }
       />
 
-      <div className="flex-1 overflow-auto p-8 flex flex-col gap-6 max-w-[1200px] w-full mx-auto">
+      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
         
         {msg && (
           <div 

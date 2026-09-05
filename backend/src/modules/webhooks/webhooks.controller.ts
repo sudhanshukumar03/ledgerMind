@@ -70,6 +70,9 @@ export class WebhooksController {
             .createHmac('sha256', secret)
             .update(payload)
             .digest('hex');
+            
+        if (expected.length !== signature.length) return false;
+        
         return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
     }
 }
