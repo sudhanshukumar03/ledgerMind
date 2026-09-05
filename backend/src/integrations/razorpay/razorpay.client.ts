@@ -29,7 +29,6 @@ export class RazorpayClient {
         return this.client;
     }
 
-    // Create a refund (only called after policy + approval)
     async createRefund(paymentId: string, amountInPaise?: number) {
         try {
             const refund = await this.getClient().payments.refund(paymentId, {
@@ -42,7 +41,6 @@ export class RazorpayClient {
         }
     }
 
-    // Create a payment link (for collecting money)
     async createPaymentLink(orderId: string, amountInPaise: number) {
         try {
             const link = await this.getClient().paymentLink.create({

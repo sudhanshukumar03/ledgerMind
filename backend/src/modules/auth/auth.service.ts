@@ -21,7 +21,6 @@ export class AuthService {
             throw new UnauthorizedException('Invalid email or password');
         }
 
-        // Return user without password hash
         const { passwordHash, ...result } = user;
         return result;
     }
