@@ -242,6 +242,37 @@ The AI layer operates above deterministic financial data.
 
 AI-generated actions become proposals that must pass through the Policy Engine.
 
+### 3.7.1 AI Interaction Flow
+
+```mermaid
+sequenceDiagram
+    participant RE as Reconciliation Engine
+    participant AIF as AI Finance Controller
+    participant PE as Policy Engine
+    participant HA as Human Approver
+    participant AE as Action Engine
+    participant AA as Audit Service
+
+    RE->>AIF: Exception created
+    activate AIF
+    AIF->>AIF: Gathers evidence via tools (read-only)
+    Note right of AIF: Tools: get_exception, get_transaction, etc.
+    AIF->>AIF: Produces analysis (likely_cause, exposure, recommended_action)
+    AIF->>PE: Proposes an action (e.g., request_refund)
+    activate PE
+    PE-->>AIF: Evaluates: allowed/denied + approval level required
+    deactivate PE
+    AIF->>HA: Presents recommendation + policy result
+    deactivate AIF
+    activate HA
+    HA->>AE: Approves AI recommendation
+    deactivate HA
+    activate AE
+    AE->>AE: Executes action (calls Payment API)
+    AE->>AA: Logs actor, reason, before/after state
+    deactivate AE
+```
+
 ### 3.8 Policy Engine
 
 The Policy Engine determines whether a proposed financial action is:

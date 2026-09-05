@@ -4,6 +4,7 @@ import { C } from '../../lib/tokens';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Amount } from '../ui/Amount';
 import { Loader2, AlertTriangle, ShieldAlert, X, AlertCircle } from 'lucide-react';
+import { useAuth } from '../../app/providers';
 
 interface ActionModalProps {
   action: Action;
@@ -12,6 +13,7 @@ interface ActionModalProps {
 }
 
 export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
+  const { user } = useAuth();
   const [exc, setExc] = useState<Exception | null>(null);
   const [excLoading, setExcLoading] = useState(true);
   const [excFailed, setExcFailed] = useState(false);
@@ -224,16 +226,22 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
                     ? <Loader2 className="w-4 h-4 animate-spin mx-auto" />
                     : 'Reject Action'}
                 </button>
-                <button
-                  onClick={handleApprove}
-                  disabled={!!submitting || !reason.trim()}
-                  className="flex-1 btn-primary py-2.5"
-                  style={{ backgroundColor: C.success, borderColor: C.success }}
-                >
-                  {submitting === 'approve'
-                    ? <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                    : 'Approve & Execute'}
-                </button>
+                {canApprove ? (
+                  <button
+                    onClick={handleApprove}
+                    disabled={!!submitting || !reason.trim()}
+                    className="flex-1 btn-primary py-2.5"
+                    style={{ backgroundColor: C.success, borderColor: C.success }}
+                  >
+                    {submitting === 'approve'
+                      ? <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                      : 'Approve & Execute'}
+                  </button>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-[12px] text-center" style={{ color: C.textMuted }}>
+                    Only ADMIN can approve. Action is awaiting admin approval.
+                  </div>
+                )}
               </div>
             </div>
           </div>

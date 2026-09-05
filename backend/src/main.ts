@@ -1,6 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { cleanupOpenApiDoc } from 'nestjs-zod';
 
 import helmet from 'helmet';
 import { json } from 'express';
@@ -19,6 +21,14 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+
+  const config = new DocumentBuilder()
+    .setTitle('LedgerMind API')
+    .setVersion('1.0')
+    .build();
+  let document = SwaggerModule.createDocument(app, config);
+  document = cleanupOpenApiDoc(document);
+  SwaggerModule.setup('api', app, document);
 
   const frontendUrl = process.env.FRONTEND_URL;
   if (process.env.NODE_ENV === 'production' && !frontendUrl) {

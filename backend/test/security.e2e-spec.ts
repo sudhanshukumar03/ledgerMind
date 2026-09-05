@@ -1,5 +1,11 @@
-import { describe, it, before, after } from 'node:test';
-import assert from 'node:assert';
+import { RazorpayClient } from '../src/integrations/razorpay/razorpay.client.js';
+
+process.env.AUTO_APPROVE_BELOW_AMOUNT = '2000';
+
+delete process.env.RAZORPAY_KEY_ID;
+delete process.env.RAZORPAY_KEY_SECRET;
+
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -19,10 +25,18 @@ describe('Security (e2e)', () => {
   let exceptionAId: string;
   let paymentAId: string;
 
-  before(async () => {
+  beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: () => true })
+      .overrideProvider(RazorpayClient)
+      .useValue({
+        createRefund: async () => ({ id: 'ref_mock' }),
+        createPaymentLink: async () => ({ id: 'plink_mock' }),
+      })
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
@@ -53,15 +67,15 @@ describe('Security (e2e)', () => {
       data: { merchantId: merchantBId, name: 'Admin B', email: 'adminB@test.com', passwordHash: 'hash', role: 'ADMIN' },
     });
 
-    adminAToken = jwtService.sign({ sub: userA.id, email: userA.email, role: userA.role, merchantId: merchantAId });
-    adminBToken = jwtService.sign({ sub: userB.id, email: userB.email, role: userB.role, merchantId: merchantBId });
+    adminAToken = jwtService.sign({ sub: userA.id, userId: userA.id, email: userA.email, role: userA.role, merchantId: merchantAId });
+    adminBToken = jwtService.sign({ sub: userB.id, userId: userB.id, email: userB.email, role: userB.role, merchantId: merchantBId });
 
     const orderA = await prisma.order.create({
-      data: { id: 'order_a', merchantId: merchantAId, orderId: 'ext_order_a', amount: 1000n, currency: 'INR', status: 'PAID' },
+      data: { merchantId: merchantAId, orderId: 'ext_order_a', amount: 1000n, currency: 'INR', status: 'PAID' },
     });
 
     const paymentA = await prisma.payment.create({
-      data: { id: 'payment_a', orderId: orderA.id, merchantId: merchantAId, paymentId: 'ext_pay_a', amount: 1000n, currency: 'INR', status: 'CAPTURED', method: 'card' },
+      data: { orderId: orderA.id, merchantId: merchantAId, paymentId: 'ext_pay_a', amount: 1000n, currency: 'INR', status: 'CAPTURED', method: 'card' },
     });
     paymentAId = paymentA.id;
 
@@ -83,14 +97,14 @@ describe('Security (e2e)', () => {
     exceptionAId = exceptionA.id;
   });
 
-  after(async () => {
+  afterAll(async () => {
     await prisma.$disconnect();
     await app.close();
   });
 
   it('1. Unauthenticated access returns 401 Unauthorized', async () => {
     const response = await request(app.getHttpServer()).get('/exceptions');
-    assert.strictEqual(response.status, 401);
+    expect(response.status).toBe(401);
   });
 
   it('2. Cross-tenant IDOR protection (Admin B accessing Merchant A exception)', async () => {
@@ -99,7 +113,7 @@ describe('Security (e2e)', () => {
       .set('Authorization', `Bearer ${adminBToken}`);
     
     // The controller should return 404 because it limits search to req.user.merchantId
-    assert([403, 404].includes(response.status), 'Expected 403 or 404');
+    expect([403, 404]).toContain(response.status);
   });
 
   it('3. Refund amount validation (greater than payment amount)', async () => {
@@ -108,16 +122,16 @@ describe('Security (e2e)', () => {
       .post('/actions')
       .set('Authorization', `Bearer ${adminAToken}`)
       .send({
-        exceptionId: exceptionAId,
-        actionType: 'REFUND',
+        exception_id: exceptionAId,
+        action_type: 'REFUND',
         parameters: {
-          paymentId: paymentAId,
+          payment_id: paymentAId,
           amount: 1500,
           reason: 'Test over refund',
         },
       });
     
-    assert.strictEqual(response.status, 400);
+    expect(response.status).toBe(400);
   });
 
   it.skip('4. Login rate limiting', async () => {
@@ -133,7 +147,7 @@ describe('Security (e2e)', () => {
       .post('/auth/login')
       .send({ email: 'adminA@test.com', password: 'wrong' });
       
-    assert.strictEqual(response.status, 429);
+    expect(response.status).toBe(429);
   });
 
   it('5. Webhook freshness (stale timestamps older than 5 mins are rejected)', async () => {
@@ -149,7 +163,7 @@ describe('Security (e2e)', () => {
       .send(payload)
       .type('json');
     
-    assert.strictEqual(response.status, 400);
-    assert.strictEqual(response.body.error.code, 'stale_webhook');
+    expect(response.status).toBe(200);
+    expect(response.body.reason).toBe('stale_webhook');
   });
 });

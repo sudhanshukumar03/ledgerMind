@@ -13,7 +13,7 @@ import useSWR from 'swr';
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   REFUND:              <RefreshCcw className="w-4 h-4" />,
-  CREATE_PAYMENT_LINK: <Link2 className="w-4 h-4" />,
+
   MARK_REVIEWED:       <CheckSquare className="w-4 h-4" />,
   ESCALATE:            <AlertTriangle className="w-4 h-4" />,
 };
@@ -68,7 +68,7 @@ export default function ActionsPage() {
   const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [reviewingAction, setReviewingAction] = useState<Action | null>(null);
 
-  const canApprove = user?.role === 'ADMIN' || user?.role === 'FINANCE';
+  const canApprove = user?.role === 'ADMIN';
 
   const { data: actions = [], isLoading: loading, mutate } = useSWR(
     ['actions', statusFilter],
@@ -124,7 +124,7 @@ export default function ActionsPage() {
           className="flex rounded-md p-1 shrink-0 w-fit"
           style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
         >
-          {['', 'PENDING_APPROVAL', 'APPROVED', 'COMPLETED', 'REJECTED', 'FAILED'].map(s => (
+          {['', 'PROPOSED', 'PENDING_APPROVAL', 'APPROVED', 'COMPLETED', 'REJECTED', 'FAILED'].map(s => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -186,7 +186,7 @@ export default function ActionsPage() {
 
         {!canApprove && (
           <p className="text-[12px] text-center" style={{ color: C.textMuted }}>
-            You have <strong className="font-bold">VIEWER</strong> access — only ADMIN and FINANCE roles can approve actions.
+            You have <strong className="font-bold">{user?.role}</strong> access — only ADMIN can approve actions. FINANCE can propose actions but not approve them.
           </p>
         )}
       </div>

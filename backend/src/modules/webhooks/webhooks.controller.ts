@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Req, Query, Headers, RawBodyRequest, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Req, Query, Headers, RawBodyRequest, UseGuards, HttpCode } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service.js';
 import * as crypto from 'crypto';
 import { Public } from '../../common/decorators/public.decorator.js';
@@ -10,6 +10,7 @@ export class WebhooksController {
 
     @Public()
     @Post('razorpay')
+    @HttpCode(200)
     async handleRazorpay(
         @Req() req: RawBodyRequest<Request>,
         @Headers('x-razorpay-signature') signature: string,

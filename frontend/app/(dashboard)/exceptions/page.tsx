@@ -106,10 +106,10 @@ function ExceptionsList() {
   }, [filtered]);
 
   return (
-    <div className="flex flex-col h-full bg-bg relative">
+    <div className="flex flex-col min-h-full bg-bg relative">
       <Header title="Exceptions" />
 
-      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
+      <div className="flex-1 p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
         
         {/* Search */}
         <div className="flex flex-wrap items-center gap-4">

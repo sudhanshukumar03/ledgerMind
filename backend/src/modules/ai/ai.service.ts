@@ -16,7 +16,7 @@ const AiAnalysisSchema = z.object({
 // ─── Tool definitions (per docs/08-AI-AGENT-SPECIFICATION.md) ────────────────
 // All tools are READ-ONLY. The AI is NOT a source of financial truth and must
 // never mutate records directly. Mutations go through the Action Engine.
-const AI_TOOLS = [
+export const AI_TOOLS = [
   { type: 'function', function: { name: 'get_transaction', description: 'Get payment/order', parameters: { type: 'object', properties: { transaction_id: { type: 'string' } }, required: ['transaction_id'] } } },
   { type: 'function', function: { name: 'get_order', description: 'Get order', parameters: { type: 'object', properties: { order_id: { type: 'string' } }, required: ['order_id'] } } },
   { type: 'function', function: { name: 'get_payment', description: 'Get payment', parameters: { type: 'object', properties: { payment_id: { type: 'string' } }, required: ['payment_id'] } } },
@@ -28,7 +28,7 @@ const AI_TOOLS = [
   { type: 'function', function: { name: 'get_merchant_history', description: 'Get merchant history', parameters: { type: 'object', properties: { merchant_id: { type: 'string' }, limit: { type: 'number' } }, required: ['merchant_id'] } } },
   { type: 'function', function: { name: 'calculate_exposure', description: 'Calc exposure', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
   { type: 'function', function: { name: 'create_resolution_plan', description: 'Suggest plan', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
-  { type: 'function', function: { name: 'list_open_exceptions', description: 'List open exceptions', parameters: { type: 'object', properties: { merchant_id: { type: 'string' }, severity: { type: 'string', enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] }, limit: { type: 'number' } }, required: ['merchant_id'] } } },
+  { type: 'function', function: { name: 'list_open_exceptions', description: 'List open exceptions', parameters: { type: 'object', properties: { severity: { type: 'string', enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] }, limit: { type: 'number' } }, required: [] } } },
   { type: 'function', function: { name: 'get_reconciliation_run', description: 'Get run', parameters: { type: 'object', properties: { run_id: { type: 'string' } }, required: ['run_id'] } } },
   { type: 'function', function: { name: 'mark_for_review', description: 'Propose review', parameters: { type: 'object', properties: { exception_id: { type: 'string' }, reason: { type: 'string' } }, required: ['exception_id', 'reason'] } } }
 ];
@@ -167,7 +167,12 @@ export class AiService {
       case 'get_exception': {
         const exc = await this.prisma.exception.findFirst({
           where: { exceptionId: args.exception_id, merchantId },
-          include: { events: { orderBy: { occurredAt: 'asc' } }, aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1 } },
+          include: {
+            events: {
+              orderBy: { occurredAt: 'asc' },
+              select: { id: true, eventType: true, entityType: true, entityId: true, occurredAt: true }
+            }
+          },
         });
         return this.safe(exc) ?? { error: 'Exception not found' };
       }
@@ -225,25 +230,39 @@ export class AiService {
       }
 
       case 'get_dashboard_stats': {
-        const where: Prisma.ExceptionWhereInput = { merchantId: args.merchant_id as string, status: 'OPEN' };
+        const where: Prisma.ExceptionWhereInput = { merchantId, status: 'OPEN' };
         if (args.severity) where.severity = args.severity as Severity;
         const exceptions = await this.prisma.exception.findMany({
           where,
           take: Math.min((args.limit as number) ?? 10, 10),
           orderBy: [{ severity: 'asc' }, { createdAt: 'asc' }],
         });
-        return this.safe(exceptions);
+        return this.safe(exceptions.map(e => ({
+          exception_id: e.exceptionId,
+          type: e.type,
+          severity: e.severity,
+          status: e.status,
+          financial_impact_paise: e.financialImpact,
+          seen: `${e.occurrenceCount}x`
+        })));
       }
 
       case 'list_open_exceptions': {
-        const where: Prisma.ExceptionWhereInput = { merchantId: args.merchant_id as string, status: 'OPEN' };
+        const where: Prisma.ExceptionWhereInput = { merchantId, status: 'OPEN' };
         if (args.severity) where.severity = args.severity as Severity;
         const exceptions = await this.prisma.exception.findMany({
           where,
           take: Math.min((args.limit as number) ?? 10, 10),
           orderBy: [{ severity: 'asc' }, { createdAt: 'asc' }],
         });
-        return this.safe(exceptions);
+        return this.safe(exceptions.map(e => ({
+          exception_id: e.exceptionId,
+          type: e.type,
+          severity: e.severity,
+          status: e.status,
+          financial_impact_paise: e.financialImpact,
+          seen: `${e.occurrenceCount}x`
+        })));
       }
 
       case 'get_reconciliation_run': {
@@ -289,7 +308,7 @@ export class AiService {
       },
     ];
 
-    const allowedTools = ['get_exception', 'get_payment', 'get_order', 'get_settlement', 'get_transaction', 'find_related_transactions', 'calculate_exposure', 'create_resolution_plan'];
+    const allowedTools = ['get_exception', 'get_payment', 'get_order', 'get_settlement', 'get_transaction', 'calculate_exposure'];
     const { finalMessage, toolCallLog } = await this.runToolLoop(messages, merchantId, allowedTools);
 
     let analysisResult: z.infer<typeof AiAnalysisSchema>;
@@ -311,7 +330,7 @@ export class AiService {
         recommendedAction: analysisResult.recommended_action ?? 'MANUAL_REVIEW',
         evidenceChain: analysisResult.evidence_chain ?? [],
         nextSteps: analysisResult.next_steps ?? [],
-        model: process.env.AI_MODEL || 'llama-3.3-70b-versatile',
+        model: process.env.AI_MODEL || 'qwen/qwen3.8-27b',
         promptVersion: '2.0',
         toolCalls: toolCallLog as Prisma.InputJsonValue[],
       },
@@ -351,7 +370,7 @@ export class AiService {
     // In Groq/OpenAI, we just pass the messages directly.
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [...userMessages] as any;
     
-    const model = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
+    const model = process.env.AI_MODEL || 'qwen/qwen3.8-27b';
     
     const toolsToPass = allowedTools 
       ? AI_TOOLS.filter(t => allowedTools.includes(t.function.name))
@@ -394,14 +413,6 @@ export class AiService {
       // Add the assistant's message with tool calls to the history
       messages.push(message);
       
-      if (round === maxRounds - 1) {
-        this.logger.log(`Investigation loop capped at ${maxRounds} iterations. Total tokens used: ${totalTokens}`);
-        return {
-          finalMessage: { content: '{"summary":"I have gathered as much information as I can within my operational limits. Please review the attached tool logs for the data I found."}' },
-          toolCallLog
-        };
-      }
-
       // Execute each tool and append the results
       for (const tc of toolCalls) {
         if (tc.type !== 'function') continue;
@@ -422,23 +433,53 @@ export class AiService {
           content: typeof result === 'string' ? result : JSON.stringify(result)
         });
       }
+
+      if (round === maxRounds - 1) {
+        this.logger.log(`Investigation loop capped at ${maxRounds} iterations. Total tokens used: ${totalTokens}`);
+        return await this.forceFinalAnswer(messages, model, toolCallLog);
+      }
     }
 
-    // Fallback: force a final non-tool response if max rounds hit
+    return await this.forceFinalAnswer(messages, model, toolCallLog);
+  }
+
+  private async forceFinalAnswer(
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    model: string,
+    toolCallLog: unknown[]
+  ) {
+    messages.push({
+      role: 'user',
+      content: 'Produce your final answer now as a single JSON object and nothing else. You have a strict length budget, so be concise: summary at most 3 sentences, likely_cause at most 2 sentences, evidence_chain at most 4 items of one short sentence each, next_steps at most 3 items of one short sentence each. A truncated response is worse than a brief one — finish the JSON object.'
+    });
+
     let fallback;
     try {
       fallback = await this.client.chat.completions.create({
         model,
         messages,
+        max_tokens: 650,
         response_format: { type: 'json_object' }
       });
     } catch (err: unknown) {
-      this.logger.error(`Groq API failed during fallback: ${(err as Error).message}`);
-      return { 
-        finalMessage: { content: '{"summary":"I am currently experiencing technical difficulties connecting to the AI provider. Please try again later.","likely_cause":"AI Service Unavailable"}' }, 
-        toolCallLog 
-      };
+      this.logger.warn(`Groq API failed during fallback: ${(err as Error).message}. Retrying without JSON mode...`);
+      try {
+        fallback = await this.client.chat.completions.create({
+          model,
+          messages,
+          max_tokens: 650
+        });
+      } catch (retryErr: unknown) {
+        this.logger.error(`Groq API retry failed during fallback: ${(retryErr as Error).message}`);
+        return { 
+          finalMessage: { content: '{"summary":"I am currently experiencing technical difficulties connecting to the AI provider. Please try again later.","likely_cause":"AI Service Unavailable"}' }, 
+          toolCallLog 
+        };
+      }
     }
+
+    const usage = fallback.usage;
+    this.logger.log(`[Forced Final Call] Tokens: Prompt=${usage?.prompt_tokens}, Completion=${usage?.completion_tokens}, Total=${usage?.total_tokens}`);
 
     return { 
       finalMessage: { content: fallback.choices[0].message.content ?? '{}' }, 

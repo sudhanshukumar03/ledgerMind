@@ -94,7 +94,7 @@ export default function DashboardPage() {
   const matchRate = total > 0 ? (matched / total) * 100 : 0;
 
   return (
-    <div className="flex flex-col h-full bg-bg relative">
+    <div className="flex flex-col min-h-full bg-bg relative">
       
       {/* Toast Notification */}
       {showToast && (
@@ -140,7 +140,7 @@ export default function DashboardPage() {
         }
       />
 
-      <div className="flex-1 overflow-auto p-6 md:p-10 space-y-8">
+      <div className="flex-1 p-6 md:p-10 space-y-8">
         <div className="col-span-full border rounded-lg p-5 shadow-sm" style={{ backgroundColor: C.surface, borderColor: C.border }}>
           <p className="text-sm" style={{ color: C.textSecondary }}>
             {buildRecap(stats)}
@@ -203,7 +203,7 @@ export default function DashboardPage() {
                   const pct = max > 0 ? (item.count / max) * 100 : 0;
                   return (
                     <Link key={item.type} href={`/exceptions?type=${item.type}`} aria-label={`${item.type.replace(/_/g, ' ')}: ${item.count} exceptions`} className="flex items-center gap-4 hover-bg-muted p-1 -mx-1 rounded transition-colors cursor-pointer">
-                      <div className="text-[13px] font-medium w-[180px] shrink-0 leading-tight" style={{ color: C.textSecondary }} title={item.type.replace(/_/g, ' ')}>
+                      <div className="text-[13px] font-medium w-[220px] shrink-0 truncate" style={{ color: C.textSecondary }} title={item.type.replace(/_/g, ' ')}>
                         {item.type.replace(/_/g, ' ')}
                       </div>
                       <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: C.neutralTint }}>
@@ -241,7 +241,7 @@ export default function DashboardPage() {
 
                   return (
                     <Link key={item.severity} href={`/exceptions?severity=${item.severity}`} aria-label={`${item.severity} severity: ${item.count} exceptions`} className="flex items-center gap-4 hover-bg-muted p-1 -mx-1 rounded transition-colors cursor-pointer">
-                      <div className="w-[100px] shrink-0" title={item.severity}>
+                      <div className="w-[120px] shrink-0" title={item.severity}>
                         <StatusBadge severity={item.severity as any} />
                       </div>
                       <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: C.neutralTint }}>

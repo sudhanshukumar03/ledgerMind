@@ -25,6 +25,22 @@ export function ToolCallList({ toolCalls }: { toolCalls?: ToolCall[] }) {
   );
 }
 
+const formatPayload = (obj: any): any => {
+  if (Array.isArray(obj)) return obj.map(formatPayload);
+  if (obj && typeof obj === 'object') {
+    const res: any = {};
+    for (const key in obj) {
+      if (key === 'lastSeenAt' && typeof obj.occurrenceCount === 'number') {
+        res[key] = `${obj.occurrenceCount}×`;
+      } else {
+        res[key] = formatPayload(obj[key]);
+      }
+    }
+    return res;
+  }
+  return obj;
+};
+
 function ToolCallItem({ tc }: { tc: ToolCall }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -51,7 +67,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           <div className="pt-2 border-t" style={{ borderColor: C.border }}>
             <span className="font-semibold block mb-1" style={{ color: C.textMuted }}>Result:</span>
             <pre className="whitespace-pre-wrap break-all overflow-y-auto max-h-64" style={{ color: C.textSecondary }}>
-              {JSON.stringify(tc.result, null, 2)}
+              {JSON.stringify(formatPayload(tc.result), null, 2)}
             </pre>
           </div>
         )}

@@ -102,7 +102,12 @@ export default function AiControllerPage() {
   ]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [aiModel, setAiModel] = useState<string>('Unknown Model');
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    aiApi.getConfig().then(res => setAiModel(res.data.model)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -158,7 +163,7 @@ export default function AiControllerPage() {
             <h1 className="text-[16px] font-bold" style={{ color: C.textPrimary }}>AI Finance Controller</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: C.success }} />
-              <span className="text-[12px]" style={{ color: C.textSecondary }}>{process.env.NEXT_PUBLIC_AI_MODEL || 'Unknown Model'} · Live data · 14 tools available</span>
+              <span className="text-[12px]" style={{ color: C.textSecondary }}>{aiModel} · Live data · 14 tools available</span>
             </div>
           </div>
         </div>

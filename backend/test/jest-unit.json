@@ -1,19 +1,13 @@
 {
   "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
+  "rootDir": "..",
   "testEnvironment": "node",
-  "testRegex": ".e2e-spec.ts$",
+  "testRegex": "src/.*\\.spec\\.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": [
-      "ts-jest",
-      {
-        "useESM": true
-      }
-    ]
+    "^.+\\.(t|j)s$": ["ts-jest", { "useESM": true }]
   },
   "extensionsToTreatAsEsm": [".ts"],
   "moduleNameMapper": {
-    "^@nestjs/throttler$": "<rootDir>/mocks/throttler.ts",
     "^(\\.{1,2}/.*)\\.js$": "$1"
   }
 }
