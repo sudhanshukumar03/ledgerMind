@@ -15,8 +15,14 @@
 </div>
 
 <div align="center">
-  <img src="docs/assets/dashboard.png" width="48%" />
-  <img src="docs/assets/investigation.png" width="48%" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dashboard-dark.png">
+    <img src="docs/assets/dashboard.png" width="48%" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/investigation-dark.png">
+    <img src="docs/assets/investigation.png" width="48%" />
+  </picture>
 </div>
 
 ---
