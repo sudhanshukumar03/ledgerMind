@@ -17,187 +17,20 @@ const AiAnalysisSchema = z.object({
 // All tools are READ-ONLY. The AI is NOT a source of financial truth and must
 // never mutate records directly. Mutations go through the Action Engine.
 const AI_TOOLS = [
-  {
-    type: 'function',
-    function: {
-      name: 'get_transaction',
-      description: 'Get a payment or order by its internal UUID',
-      parameters: {
-        type: 'object',
-        properties: { transaction_id: { type: 'string', description: 'Internal UUID' } },
-        required: ['transaction_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_order',
-      description: 'Get order details by internal UUID',
-      parameters: {
-        type: 'object',
-        properties: { order_id: { type: 'string' } },
-        required: ['order_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_payment',
-      description: 'Get payment details by internal UUID',
-      parameters: {
-        type: 'object',
-        properties: { payment_id: { type: 'string' } },
-        required: ['payment_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_refund',
-      description: 'Get refund details by internal UUID',
-      parameters: {
-        type: 'object',
-        properties: { refund_id: { type: 'string' } },
-        required: ['refund_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_settlement',
-      description: 'Get settlement details by internal UUID',
-      parameters: {
-        type: 'object',
-        properties: { settlement_id: { type: 'string' } },
-        required: ['settlement_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'find_related_transactions',
-      description: 'Find all payments, refunds, and settlements related to a payment or order',
-      parameters: {
-        type: 'object',
-        properties: { transaction_id: { type: 'string', description: 'Internal UUID of payment or order' } },
-        required: ['transaction_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_exception',
-      description: 'Get a reconciliation exception including its events and latest AI analysis',
-      parameters: {
-        type: 'object',
-        properties: { exception_id: { type: 'string' } },
-        required: ['exception_id'],
-      },
-    },
-  },
-    {
-      type: 'function',
-      function: {
-        name: 'get_customer_history',
-        description: 'Get recent orders and payments for a customer',
-        parameters: {
-          type: 'object',
-          properties: {
-            customer_id: { type: 'string' },
-            limit: { type: 'number', description: 'Max records to return (default 10, max 100)' },
-          },
-          required: ['customer_id'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'get_merchant_history',
-        description: 'Get recent exceptions and reconciliation runs for a merchant',
-        parameters: {
-          type: 'object',
-          properties: {
-            merchant_id: { type: 'string' },
-            limit: { type: 'number', description: 'Max records to return (default 10, max 100)' },
-          },
-          required: ['merchant_id'],
-        },
-      },
-    },
-  {
-    type: 'function',
-    function: {
-      name: 'calculate_exposure',
-      description: 'Calculate total unresolved financial exposure for an exception',
-      parameters: {
-        type: 'object',
-        properties: { exception_id: { type: 'string' } },
-        required: ['exception_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'create_resolution_plan',
-      description: 'Generate a suggested resolution plan for an exception (read-only recommendation, NOT executed)',
-      parameters: {
-        type: 'object',
-        properties: { exception_id: { type: 'string' } },
-        required: ['exception_id'],
-      },
-    },
-  },
-    {
-      type: 'function',
-      function: {
-        name: 'list_open_exceptions',
-        description: 'List open exceptions for a merchant, optionally filtered by severity or type',
-        parameters: {
-          type: 'object',
-          properties: {
-            merchant_id: { type: 'string' },
-            severity: { type: 'string', enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] },
-            limit: { type: 'number', description: 'Max records to return (max 100)' },
-          },
-          required: ['merchant_id'],
-        },
-      },
-    },
-  {
-    type: 'function',
-    function: {
-      name: 'get_reconciliation_run',
-      description: 'Get details of a reconciliation run',
-      parameters: {
-        type: 'object',
-        properties: { run_id: { type: 'string' } },
-        required: ['run_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'mark_for_review',
-      description: 'PROPOSE marking an exception for manual review (requires human approval via Action Engine)',
-      parameters: {
-        type: 'object',
-        properties: {
-          exception_id: { type: 'string' },
-          reason: { type: 'string' },
-        },
-        required: ['exception_id', 'reason'],
-      },
-    },
-  },
+  { type: 'function', function: { name: 'get_transaction', description: 'Get payment/order', parameters: { type: 'object', properties: { transaction_id: { type: 'string' } }, required: ['transaction_id'] } } },
+  { type: 'function', function: { name: 'get_order', description: 'Get order', parameters: { type: 'object', properties: { order_id: { type: 'string' } }, required: ['order_id'] } } },
+  { type: 'function', function: { name: 'get_payment', description: 'Get payment', parameters: { type: 'object', properties: { payment_id: { type: 'string' } }, required: ['payment_id'] } } },
+  { type: 'function', function: { name: 'get_refund', description: 'Get refund', parameters: { type: 'object', properties: { refund_id: { type: 'string' } }, required: ['refund_id'] } } },
+  { type: 'function', function: { name: 'get_settlement', description: 'Get settlement', parameters: { type: 'object', properties: { settlement_id: { type: 'string' } }, required: ['settlement_id'] } } },
+  { type: 'function', function: { name: 'find_related_transactions', description: 'Find related txns', parameters: { type: 'object', properties: { transaction_id: { type: 'string' } }, required: ['transaction_id'] } } },
+  { type: 'function', function: { name: 'get_exception', description: 'Get exception', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
+  { type: 'function', function: { name: 'get_customer_history', description: 'Get customer history', parameters: { type: 'object', properties: { customer_id: { type: 'string' }, limit: { type: 'number' } }, required: ['customer_id'] } } },
+  { type: 'function', function: { name: 'get_merchant_history', description: 'Get merchant history', parameters: { type: 'object', properties: { merchant_id: { type: 'string' }, limit: { type: 'number' } }, required: ['merchant_id'] } } },
+  { type: 'function', function: { name: 'calculate_exposure', description: 'Calc exposure', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
+  { type: 'function', function: { name: 'create_resolution_plan', description: 'Suggest plan', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
+  { type: 'function', function: { name: 'list_open_exceptions', description: 'List open exceptions', parameters: { type: 'object', properties: { merchant_id: { type: 'string' }, severity: { type: 'string', enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] }, limit: { type: 'number' } }, required: ['merchant_id'] } } },
+  { type: 'function', function: { name: 'get_reconciliation_run', description: 'Get run', parameters: { type: 'object', properties: { run_id: { type: 'string' } }, required: ['run_id'] } } },
+  { type: 'function', function: { name: 'mark_for_review', description: 'Propose review', parameters: { type: 'object', properties: { exception_id: { type: 'string' }, reason: { type: 'string' } }, required: ['exception_id', 'reason'] } } }
 ];
 
 // ─── Groq Tool Mapping ──────────────────────────────────────────────────
@@ -240,59 +73,92 @@ export class AiService {
     args: Record<string, unknown>,
     merchantId: string,
   ): Promise<unknown> {
+    const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
     switch (name) {
       case 'get_transaction': {
+        const idStr = args.transaction_id as string;
+        const pWhere = isUuid(idStr) ? { id: idStr } : { paymentId: idStr };
+        const oWhere = isUuid(idStr) ? { id: idStr } : { orderId: idStr };
+
         // Try payment first, then order
         const payment = await this.prisma.payment.findFirst({
-          where: { id: args.transaction_id, merchantId },
+          where: { ...pWhere, merchantId },
           include: { order: true, refunds: true },
         });
         if (payment) return this.safe(payment);
 
         const order = await this.prisma.order.findFirst({
-          where: { id: args.transaction_id, merchantId },
+          where: { ...oWhere, merchantId },
           include: { payments: true },
         });
         return this.safe(order) ?? { error: 'Transaction not found' };
       }
 
       case 'get_order': {
+        const idStr = args.order_id as string;
+        const where = isUuid(idStr) ? { id: idStr } : { orderId: idStr };
         const order = await this.prisma.order.findFirst({
-          where: { id: args.order_id, merchantId },
+          where: { ...where, merchantId },
           include: { payments: true },
         });
         return this.safe(order) ?? { error: 'Order not found' };
       }
 
       case 'get_payment': {
+        const idStr = args.payment_id as string;
+        const where = isUuid(idStr) ? { id: idStr } : { paymentId: idStr };
         const payment = await this.prisma.payment.findFirst({
-          where: { id: args.payment_id, merchantId },
+          where: { ...where, merchantId },
           include: { order: true, refunds: true },
         });
         return this.safe(payment) ?? { error: 'Payment not found' };
       }
 
       case 'get_refund': {
+        const idStr = args.refund_id as string;
+        const where = isUuid(idStr) ? { id: idStr } : { refundId: idStr };
         const refund = await this.prisma.refund.findFirst({
-          where: { id: args.refund_id, merchantId },
+          where: { ...where, merchantId },
           include: { payment: true },
         });
         return this.safe(refund) ?? { error: 'Refund not found' };
       }
 
       case 'get_settlement': {
+        const idStr = args.settlement_id as string;
+        const where = isUuid(idStr) ? { id: idStr } : { settlementId: idStr };
         const settlement = await this.prisma.settlement.findFirst({
-          where: { id: args.settlement_id, merchantId },
+          where: { ...where, merchantId },
           include: { bankTransactions: true },
         });
         return this.safe(settlement) ?? { error: 'Settlement not found' };
       }
 
       case 'find_related_transactions': {
+        const idStr = args.transaction_id as string;
+        let internalOrderId = idStr;
+        if (!isUuid(idStr)) {
+          if (idStr.startsWith('pay_')) {
+            const p = await this.prisma.payment.findFirst({ where: { paymentId: idStr, merchantId }});
+            internalOrderId = p?.orderId ?? idStr;
+          } else {
+            const o = await this.prisma.order.findFirst({ where: { orderId: idStr, merchantId }});
+            internalOrderId = o?.id ?? idStr;
+          }
+        } else {
+          const p = await this.prisma.payment.findFirst({ where: { id: idStr, merchantId } });
+          if (p && p.orderId) internalOrderId = p.orderId;
+        }
+
+        if (!isUuid(internalOrderId)) {
+          return { error: 'Transaction not found' };
+        }
+
         const [payments, refunds] = await Promise.all([
-          this.prisma.payment.findMany({ where: { orderId: args.transaction_id, merchantId } }),
+          this.prisma.payment.findMany({ where: { orderId: internalOrderId, merchantId } }),
           this.prisma.refund.findMany({
-            where: { payment: { orderId: args.transaction_id }, merchantId },
+            where: { payment: { orderId: internalOrderId }, merchantId },
           }),
         ]);
         return this.safe({ payments, refunds });
@@ -300,14 +166,14 @@ export class AiService {
 
       case 'get_exception': {
         const exc = await this.prisma.exception.findFirst({
-          where: { id: args.exception_id, merchantId },
+          where: { exceptionId: args.exception_id, merchantId },
           include: { events: { orderBy: { occurredAt: 'asc' } }, aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1 } },
         });
         return this.safe(exc) ?? { error: 'Exception not found' };
       }
 
       case 'get_customer_history': {
-        const limit = Math.min((args.limit as number) ?? 10, 100);
+        const limit = Math.min((args.limit as number) ?? 10, 10);
         const [orders, payments] = await Promise.all([
           this.prisma.order.findMany({ where: { merchantId, customerId: args.customer_id }, take: limit, orderBy: { createdAt: 'desc' } }),
           this.prisma.payment.findMany({ 
@@ -320,7 +186,7 @@ export class AiService {
       }
 
       case 'get_merchant_history': {
-        const limit = Math.min((args.limit as number) ?? 10, 100);
+        const limit = Math.min((args.limit as number) ?? 10, 10);
         const [exceptions, runs] = await Promise.all([
           this.prisma.exception.findMany({ where: { merchantId }, take: limit, orderBy: { createdAt: 'desc' } }),
           this.prisma.reconciliationRun.findMany({ where: { merchantId }, take: limit, orderBy: { startedAt: 'desc' } }),
@@ -330,7 +196,7 @@ export class AiService {
 
       case 'calculate_exposure': {
         const exc = await this.prisma.exception.findFirst({
-          where: { id: args.exception_id, merchantId },
+          where: { exceptionId: args.exception_id, merchantId },
           select: { financialImpact: true, differenceAmount: true, status: true, severity: true },
         });
         if (!exc) return { error: 'Exception not found' };
@@ -345,7 +211,7 @@ export class AiService {
 
       case 'create_resolution_plan': {
         const exc = await this.prisma.exception.findFirst({
-          where: { id: args.exception_id, merchantId },
+          where: { exceptionId: args.exception_id, merchantId },
           include: { events: true },
         });
         if (!exc) return { error: 'Exception not found' };
@@ -363,7 +229,7 @@ export class AiService {
         if (args.severity) where.severity = args.severity as Severity;
         const exceptions = await this.prisma.exception.findMany({
           where,
-          take: Math.min((args.limit as number) ?? 20, 100),
+          take: Math.min((args.limit as number) ?? 10, 10),
           orderBy: [{ severity: 'asc' }, { createdAt: 'asc' }],
         });
         return this.safe(exceptions);
@@ -374,7 +240,7 @@ export class AiService {
         if (args.severity) where.severity = args.severity as Severity;
         const exceptions = await this.prisma.exception.findMany({
           where,
-          take: Math.min((args.limit as number) ?? 20, 100),
+          take: Math.min((args.limit as number) ?? 10, 10),
           orderBy: [{ severity: 'asc' }, { createdAt: 'asc' }],
         });
         return this.safe(exceptions);
@@ -407,7 +273,7 @@ export class AiService {
 
   async investigateException(exceptionId: string, merchantId: string) {
     const exception = await this.prisma.exception.findFirst({
-      where: { id: exceptionId, merchantId },
+      where: { exceptionId: exceptionId, merchantId },
       include: { events: { orderBy: { occurredAt: 'asc' } } },
     });
     if (!exception) throw new NotFoundException('Exception not found');
@@ -423,7 +289,8 @@ export class AiService {
       },
     ];
 
-    const { finalMessage, toolCallLog } = await this.runToolLoop(messages, merchantId);
+    const allowedTools = ['get_exception', 'get_payment', 'get_order', 'get_settlement', 'get_transaction', 'find_related_transactions', 'calculate_exposure', 'create_resolution_plan'];
+    const { finalMessage, toolCallLog } = await this.runToolLoop(messages, merchantId, allowedTools);
 
     let analysisResult: z.infer<typeof AiAnalysisSchema>;
     try {
@@ -474,26 +341,36 @@ export class AiService {
   private async runToolLoop(
     userMessages: { role: string; content?: string }[],
     merchantId: string,
-    maxRounds = 6,
+    allowedTools?: string[],
+    maxRounds = 3,
   ): Promise<{ finalMessage: { content: unknown }; toolCallLog: unknown[] }> {
     this.logger.log('Starting Groq investigation loop');
     const toolCallLog: unknown[] = [];
+    let totalTokens = 0;
     
     // In Groq/OpenAI, we just pass the messages directly.
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [...userMessages] as any;
     
     const model = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
+    
+    const toolsToPass = allowedTools 
+      ? AI_TOOLS.filter(t => allowedTools.includes(t.function.name))
+      : AI_TOOLS;
 
     for (let round = 0; round < maxRounds; round++) {
       let response;
       try {
         response = await this.client.chat.completions.create({
           model,
+          max_tokens: 800,
           messages,
-          tools: AI_TOOLS as OpenAI.Chat.ChatCompletionTool[],
+          tools: toolsToPass as OpenAI.Chat.ChatCompletionTool[],
           tool_choice: 'auto',
-          response_format: { type: 'json_object' } // Enforce JSON output for our needs
         });
+        
+        const usage = response.usage;
+        totalTokens += usage?.total_tokens ?? 0;
+        this.logger.log(`[Round ${round + 1}] Tokens: Prompt=${usage?.prompt_tokens}, Completion=${usage?.completion_tokens}, Total=${usage?.total_tokens}`);
       } catch (err: unknown) {
         this.logger.error(`Groq API failed during tool loop: ${(err as Error).message}`);
         return { 
@@ -507,6 +384,7 @@ export class AiService {
       
       // If there are no tool calls, this is the final response
       if (!toolCalls || toolCalls.length === 0) {
+        this.logger.log(`Investigation completed in ${round + 1} iterations. Total tokens used: ${totalTokens}`);
         return { 
           finalMessage: { content: message.content ?? '{}' }, 
           toolCallLog 
@@ -515,6 +393,14 @@ export class AiService {
 
       // Add the assistant's message with tool calls to the history
       messages.push(message);
+      
+      if (round === maxRounds - 1) {
+        this.logger.log(`Investigation loop capped at ${maxRounds} iterations. Total tokens used: ${totalTokens}`);
+        return {
+          finalMessage: { content: '{"summary":"I have gathered as much information as I can within my operational limits. Please review the attached tool logs for the data I found."}' },
+          toolCallLog
+        };
+      }
 
       // Execute each tool and append the results
       for (const tc of toolCalls) {

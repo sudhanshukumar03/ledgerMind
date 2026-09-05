@@ -26,7 +26,7 @@ const QUICK_PROMPTS = [
   { text: 'What actions are pending approval?', icon: <Zap className="w-3 h-3" /> },
 ];
 
-import { PlainText } from '../../../components/ai/PlainText';
+import { AiMarkdown } from '../../../components/ai/AiMarkdown';
 
 function AssistantBubble({ msg }: { msg: Message }) {
   if (msg.loading) {
@@ -57,7 +57,7 @@ function AssistantBubble({ msg }: { msg: Message }) {
       <div className="flex flex-col gap-1 w-full max-w-2xl">
         <div className="text-[11px] font-semibold" style={{ color: C.textSecondary }}>LedgerMind AI</div>
         <div className="px-5 py-4 rounded-2xl rounded-tl-sm border" style={{ backgroundColor: C.surface, borderColor: C.border }}>
-          <PlainText text={msg.content} className="text-[14px] leading-relaxed whitespace-pre-wrap block" style={{ color: C.textPrimary }} />
+          <AiMarkdown content={msg.content} />
           
           {(msg.toolCallsMade || msg.suggestedActions?.length) ? (
             <div className="mt-4 pt-3 border-t flex flex-col gap-3" style={{ borderColor: C.border }}>
@@ -158,7 +158,7 @@ export default function AiControllerPage() {
             <h1 className="text-[16px] font-bold" style={{ color: C.textPrimary }}>AI Finance Controller</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: C.success }} />
-              <span className="text-[12px]" style={{ color: C.textSecondary }}>GPT-4o · Live data · 14 tools available</span>
+              <span className="text-[12px]" style={{ color: C.textSecondary }}>{process.env.NEXT_PUBLIC_AI_MODEL || 'Unknown Model'} · Live data · 14 tools available</span>
             </div>
           </div>
         </div>
@@ -186,7 +186,7 @@ export default function AiControllerPage() {
                 <div className="flex flex-col gap-1 w-full max-w-2xl items-end">
                   <div className="text-[11px] font-semibold" style={{ color: C.textSecondary }}>You</div>
                   <div className="px-5 py-3 rounded-2xl rounded-tr-sm shadow-sm" style={{ backgroundColor: C.primary, color: C.bg }}>
-                    <PlainText text={msg.content} className="text-[14px] leading-relaxed whitespace-pre-wrap block" />
+                    <AiMarkdown content={msg.content} />
                   </div>
                 </div>
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: C.neutralTint, color: C.textPrimary }}>

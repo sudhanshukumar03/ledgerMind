@@ -5,7 +5,7 @@ import { useAiInvestigation } from '../../hooks/useAiInvestigation';
 import { AiAnalysis } from '../../lib/types';
 import { C } from '../../lib/tokens';
 import { Bot, Loader2, Zap } from 'lucide-react';
-import { PlainText } from './PlainText';
+import { AiMarkdown } from './AiMarkdown';
 import { ToolCallList } from './ToolCallList';
 
 export function AiChatThread({ exceptionId, initialAnalysis }: { exceptionId: string; initialAnalysis?: AiAnalysis }) {
@@ -78,18 +78,18 @@ export function AiChatThread({ exceptionId, initialAnalysis }: { exceptionId: st
 
               <div>
                 <p className="text-[11px] uppercase tracking-wide mb-1 font-semibold" style={{ color: C.textMuted }}>Summary</p>
-                <PlainText text={analysis.summary} className="text-[13px]" />
+                <AiMarkdown content={analysis.summary} />
               </div>
               
               <div>
                 <p className="text-[11px] uppercase tracking-wide mb-1 font-semibold" style={{ color: C.textMuted }}>Likely Cause</p>
-                <PlainText text={analysis.likelyCause} className="text-[13px]" />
+                <AiMarkdown content={analysis.likelyCause} />
               </div>
 
               <div>
                 <p className="text-[11px] uppercase tracking-wide mb-1 font-semibold" style={{ color: C.textMuted }}>Recommended Action</p>
                 <div className="inline-block px-3 py-1.5 text-[12px] font-semibold border rounded-md" style={{ backgroundColor: C.infoTint, borderColor: `${C.info}40`, color: C.info }}>
-                  <PlainText text={analysis.recommendedAction} />
+                  <AiMarkdown content={analysis.recommendedAction} />
                 </div>
               </div>
 

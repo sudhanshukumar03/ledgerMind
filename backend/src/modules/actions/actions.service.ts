@@ -111,8 +111,8 @@ export class ActionsService {
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role === Role.VIEWER) {
-      throw new ForbiddenException('You do not have permission to approve actions');
+    if (!user || user.role !== Role.ADMIN) {
+      throw new ForbiddenException('Only ADMIN users can approve actions');
     }
 
     const updatedCount = await this.prisma.action.updateMany({

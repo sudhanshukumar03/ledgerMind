@@ -28,8 +28,10 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
       .finally(() => setExcLoading(false));
   }, [action.exceptionId]);
 
+  const canApprove = user?.role === 'ADMIN';
+
   const handleApprove = async () => {
-    if (!reason.trim() || submitting) return;
+    if (!canApprove || !reason.trim() || submitting) return;
     setSubmitting('approve');
     setInlineError(null);
     try {
