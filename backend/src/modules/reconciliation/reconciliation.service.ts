@@ -35,6 +35,17 @@ export interface RunReconciliationArgs {
 export class ReconciliationService {
   private readonly logger = new Logger(ReconciliationService.name);
 
+  /**
+   * The reconciliation engine is deterministic code.
+   * 
+   * It uses a 3-level matching ladder:
+   * 1. Exact ID (order_id, payment_id)
+   * 2. UTR match (bank <-> settlement)
+   * 3. Amount + time proximity (one-to-one enforced)
+   * 
+   * Every match is logged to the audit trail. The AI never touches this module.
+   */
+
   // Configurables for scoring
   private readonly FINANCIAL_IMPACT_WEIGHT = 0.5; // score per unit difference
   private readonly CUSTOMER_IMPACT_WEIGHT = 20; // HIGH = 3, MEDIUM = 2, LOW = 1
@@ -43,6 +54,14 @@ export class ReconciliationService {
 
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Runs a full reconciliation pass across all merchants.
+   * 
+   * This is idempotent — calling it multiple times will not
+   * create duplicate exceptions due to `dedup_key` constraints.
+   * 
+   * @returns {Promise<any>} The run results and stats.
+   */
   async runReconciliation(args: RunReconciliationArgs) {
     const { merchantId, dateFrom, dateTo } = args;
 
@@ -73,7 +92,6 @@ export class ReconciliationService {
 
     // 3. Save Exceptions and Matches within Transaction
     const results = await this.prisma.$transaction(async (tx) => {
-      // Create Run Record
       const run = await tx.reconciliationRun.create({
         data: {
           merchantId,
@@ -84,7 +102,6 @@ export class ReconciliationService {
         },
       });
 
-      // Insert Matches
       for (const match of matchesToCreate) {
         await tx.reconciliationMatch.upsert({
           where: {
@@ -165,7 +182,6 @@ export class ReconciliationService {
         }
       }
 
-      // Complete Run Record
       await tx.reconciliationRun.update({
         where: { id: run.id },
         data: {

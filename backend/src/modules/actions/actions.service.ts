@@ -23,6 +23,13 @@ export class ActionsService {
     private razorpay: RazorpayClient,
   ) {}
 
+  /**
+   * Proposes a new action to resolve an exception.
+   * 
+   * Validates the action against business policy. If the policy
+   * requires approval, the action is created with PENDING_APPROVAL status.
+   * Otherwise, it executes immediately.
+   */
   async createAction(userId: string, createActionDto: CreateActionDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
@@ -188,9 +195,12 @@ export class ActionsService {
 
   /**
    * Executes an APPROVED action by calling the appropriate Razorpay API.
+   * 
    * Transitions: APPROVED → EXECUTING → COMPLETED | FAILED
    * Records before/after state in audit_logs.
    * On REFUND completion, marks the parent exception RESOLVED.
+   * 
+   * @returns {Promise<void>} Resolves when the action completes.
    */
   async executeAction(actionId: string, merchantId: string, actorId?: string): Promise<void> {
     const action = await this.prisma.action.findUnique({ where: { id: actionId } });
