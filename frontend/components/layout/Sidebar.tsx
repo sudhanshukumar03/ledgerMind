@@ -11,9 +11,10 @@ import {
   Cpu,
   RefreshCw,
   ListOrdered,
-  LogOut,
-  Zap
+  LogOut
 } from 'lucide-react';
+import { Logo } from '../ui/Logo';
+import { ThemeToggle } from '../ui/ThemeToggle';
 
 const NAV = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -37,17 +38,9 @@ export function Sidebar() {
       style={{ backgroundColor: C.surface, borderRight: `1px solid ${C.border}` }}
     >
       {/* Logo */}
-      <div className="flex items-center gap-3 px-5 py-5" style={{ borderBottom: `1px solid ${C.border}` }}>
-        <div 
-          className="flex items-center justify-center w-8 h-8 rounded-lg"
-          style={{ backgroundColor: C.primary }}
-        >
-          <Zap className="w-4 h-4 text-white" />
-        </div>
-        <div>
-          <div className="text-sm font-bold tracking-tight" style={{ color: C.textPrimary }}>LedgerMind</div>
-          <div className="text-[10px] font-medium uppercase tracking-wider" style={{ color: C.textMuted }}>AI Controller</div>
-        </div>
+      <div className="flex flex-col items-start justify-center px-5 py-5" style={{ borderBottom: `1px solid ${C.border}` }}>
+        <Logo className="h-7 w-auto" />
+        <div className="text-[10px] font-medium uppercase tracking-wider pl-[28px]" style={{ color: C.textMuted }}>AI Controller</div>
       </div>
 
       {/* Navigation */}
@@ -88,14 +81,17 @@ export function Sidebar() {
             <div className="text-sm font-medium truncate" style={{ color: C.textPrimary }}>{user?.name ?? 'Guest'}</div>
             <div className="text-[10px] uppercase tracking-wide" style={{ color: C.textMuted }}>{user?.role ?? ''}</div>
           </div>
-          <button
-            onClick={logout}
-            title="Sign out"
-            className="p-1.5 rounded-lg hover-bg-muted"
-            style={{ color: C.textMuted }}
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <button
+              onClick={logout}
+              title="Sign out"
+              className="p-1.5 rounded-lg hover-bg-muted"
+              style={{ color: C.textMuted }}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </aside>
