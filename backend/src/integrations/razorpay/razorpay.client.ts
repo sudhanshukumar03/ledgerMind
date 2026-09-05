@@ -30,6 +30,17 @@ export class RazorpayClient {
     }
 
     async createRefund(paymentId: string, amountInPaise?: number) {
+        if (paymentId.includes('DEMO')) {
+            this.logger.log(`[MOCK] Razorpay refund successful for demo payment: ${paymentId}`);
+            return {
+                id: `rfnd_DEMO_${Date.now()}`,
+                entity: 'refund',
+                amount: amountInPaise,
+                payment_id: paymentId,
+                status: 'processed'
+            };
+        }
+
         try {
             const refund = await this.getClient().payments.refund(paymentId, {
                 amount: amountInPaise,
