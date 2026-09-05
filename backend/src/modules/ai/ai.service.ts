@@ -165,8 +165,9 @@ export class AiService {
       }
 
       case 'get_exception': {
+        const idStr = args.exception_id as string;
         const exc = await this.prisma.exception.findFirst({
-          where: { exceptionId: args.exception_id, merchantId },
+          where: isUuid(idStr) ? { id: idStr, merchantId } : { exceptionId: idStr, merchantId },
           include: {
             events: {
               orderBy: { occurredAt: 'asc' },
@@ -200,8 +201,9 @@ export class AiService {
       }
 
       case 'calculate_exposure': {
+        const idStr = args.exception_id as string;
         const exc = await this.prisma.exception.findFirst({
-          where: { exceptionId: args.exception_id, merchantId },
+          where: isUuid(idStr) ? { id: idStr, merchantId } : { exceptionId: idStr, merchantId },
           select: { financialImpact: true, differenceAmount: true, status: true, severity: true },
         });
         if (!exc) return { error: 'Exception not found' };
@@ -215,8 +217,9 @@ export class AiService {
       }
 
       case 'create_resolution_plan': {
+        const idStr = args.exception_id as string;
         const exc = await this.prisma.exception.findFirst({
-          where: { exceptionId: args.exception_id, merchantId },
+          where: isUuid(idStr) ? { id: idStr, merchantId } : { exceptionId: idStr, merchantId },
           include: { events: true },
         });
         if (!exc) return { error: 'Exception not found' };
@@ -291,8 +294,9 @@ export class AiService {
   // ─── Public API ───────────────────────────────────────────────────────────
 
   async investigateException(exceptionId: string, merchantId: string) {
+    const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
     const exception = await this.prisma.exception.findFirst({
-      where: { exceptionId: exceptionId, merchantId },
+      where: isUuid(exceptionId) ? { id: exceptionId, merchantId } : { exceptionId: exceptionId, merchantId },
       include: { events: { orderBy: { occurredAt: 'asc' } } },
     });
     if (!exception) throw new NotFoundException('Exception not found');
