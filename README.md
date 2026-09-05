@@ -2,9 +2,7 @@
 
 # LedgerMind
 
-**AI-powered payment reconciliation and exception resolution for Razorpay merchants.**
-
-*Machines reconcile. AI investigates. Policies control. Humans approve.*
+**Your ledger already knows what happened. LedgerMind explains what it means.**
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript&logoColor=white)
 ![NestJS](https://img.shields.io/badge/NestJS-10-E0234E?logo=nestjs&logoColor=white)
@@ -14,66 +12,124 @@
 ![Redis](https://img.shields.io/badge/Redis-BullMQ-DC382D?logo=redis&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-14B8A6)
 
-<br/>
-<br/>
+</div>
 
-![LedgerMind Dashboard](docs/assets/dashboard.png)
-<br/>
-![AI Investigation View](docs/assets/investigation.png)
-
+<div align="center">
+  <img src="docs/assets/dashboard.png" width="48%" />
+  <img src="docs/assets/investigation.png" width="48%" />
 </div>
 
 ---
 
-## The Problem
+## Monday, 9:40am
 
-In a Razorpay-style payment system, one real-world transaction is scattered across **five different record types** — Orders, Payments, Refunds, Settlements, and Bank Transactions. Each is written by a different subsystem, at a different time, through asynchronous webhooks that arrive out of order, duplicate themselves, or never arrive at all.
+Yesterday's settlement landed at 4:12 in the morning. One line on a bank statement: **₹18,42,300**.
 
-The result is that the records **disagree**, routinely:
+Behind that one line sit 312 payments, 14 refunds, two chargebacks, and a partial capture someone approved on Friday afternoon. The settlement report says one number. Your dashboard says another. They are ₹4,200 apart.
 
-- A payment is marked `FAILED` by the gateway, but the bank shows the money arrived.
-- A customer is charged twice; only one charge has an order behind it.
-- A settlement lands ₹4,200 short of the payments it claims to cover.
-- A refund was issued in the dashboard but never debited the bank.
+Nothing is missing. Every record exists, timestamped, in the right table. And you still don't know what happened.
 
-Finding these is annoying. **Explaining** them is the real cost. A finance operator spends their day opening six tabs, cross-referencing UTRs against timestamps, and writing the same investigation note for the hundredth time. The reconciliation isn't the work — the investigation around it is.
+So you start where you always start. Open the settlement in one tab, the payments list in another, the bank statement in a third. Sort by amount. Sort by time. Find the payment that looks close. Check whether the refund on it went out before or after the cutoff. Write it down somewhere so you don't have to do it again — knowing you will do it again on Thursday.
 
-## The Solution
+## The problem isn't missing data
 
-LedgerMind runs a **deterministic reconciliation engine** that continuously matches records across all five sources, classifies every mismatch it cannot explain into a typed exception, and scores it by financial exposure. Then an **AI Finance Controller** investigates each exception using read-only tools, produces a confidence-scored root-cause analysis with a cited evidence trail, and *proposes* a remediation.
+It's that there's too much of it, and almost no context around any of it.
 
-It never executes one. Every financial action passes through a **Policy Engine** and then a **human approver** before the Action Engine touches money. The AI has no write path to financial state — by construction, not by prompt instruction.
+A single real transaction in a Razorpay-style system is scattered across five record types — Orders, Payments, Refunds, Settlements, Bank Transactions — each written by a different subsystem, at a different moment, over webhooks that arrive late, arrive twice, or don't arrive. Each record is individually correct. Together they disagree.
 
-That split is the whole design:
+And what you actually need from them isn't a row. It's an answer:
 
-| Layer | Responsibility | May mutate money? |
-| --- | --- | --- |
-| Reconciliation Engine | Match, score, classify — pure deterministic code | No |
-| AI Controller | Investigate, explain, propose — read-only tools | **Never** |
-| Policy Engine | Evaluate limits, roles, and risk on every proposal | No |
-| Human Approver | Approve or reject | Authorizes |
-| Action Engine | Execute the approved action, write the audit trail | Yes |
+> Did that ₹50,000 payment really fail, or did the money arrive anyway?
+>
+> Was this customer charged twice, or am I looking at an authorization and its capture?
+>
+> Why is this settlement ₹4,200 short of the payments it claims to cover?
+>
+> Has Thursday's refund actually left the account, or is it still sitting somewhere?
+>
+> Of the forty things that look wrong this morning, which one is expensive?
+
+None of those questions are answered by a table. Every one of them is answered by an *investigation* — and an investigation is you, six tabs, and forty minutes.
+
+## Recording isn't understanding
+
+This is the gap. Financial systems are excellent at recording what happened and nearly silent on what it means.
+
+So the cost of reconciliation was never the matching. Matching is arithmetic; a computer has always been able to do it. The cost is everything that happens *after* the mismatch appears — working out which of five records is lying, deciding whether it matters, and justifying whatever you do about it to someone who will ask later.
+
+That's the part nobody automated. Not because it's hard to compute, but because it was never a computation.
+
+## So it explains itself
+
+LedgerMind was built on one idea: **the ledger already contains the answer, and the work is turning it into an explanation you can act on.**
+
+Which means the morning looks different. Matching runs continuously in the background, deterministically, in integer paise — exact IDs first, then UTR, then amount and time. What matches, matches, and you never see it. What doesn't match becomes a **typed exception**, ranked not by how recent it is but by **how much money is at risk**.
+
+Then each exception gets investigated. Not by you — by an AI controller with fourteen read-only tools that pulls the order, the payment, the refund, the settlement, and the bank line, reads the timeline in the order the money actually moved, and comes back with a root cause, a confidence score, and the evidence it used. Every claim traceable to a record.
+
+And when the answer is *"refund this customer ₹50,000"*, it doesn't do that. It **proposes** it. The proposal runs through a policy engine, then waits for a human being to approve it. Then it executes, logs everything, and reconciles itself closed.
+
+So the forty things that looked wrong this morning are now one queue, sorted by what they cost you, each with an explanation attached and a recommended next step waiting for a yes.
+
+## The transformation
+
+<table>
+<tr><th width="50%">Before</th><th width="50%">With LedgerMind</th></tr>
+<tr valign="top"><td>
+
+*"Something's off by ₹4,200 and I don't know where to start."*
+
+Six tabs. Sort, cross-reference, guess. Forty minutes per exception, and no record of your reasoning once you've closed the tabs.
+
+Everything looks equally urgent, so the ₹12 rounding difference gets the same attention as the ₹50,000 that never arrived.
+
+Your reasoning lives in your head. When someone asks in March why that refund was issued, the answer is "I think we checked."
+
+</td><td>
+
+*"₹50,000 credited at the bank against a payment the gateway marked failed. Here's the evidence. Approve the refund?"*
+
+The queue is sorted by money at risk. The critical item is at the top because it's expensive, not because it's new.
+
+The investigation is already done, with its sources cited and its confidence stated.
+
+And the reasoning is on the record — who proposed, what the analysis said, which policy applied, who approved, what was sent, what came back. Correlated by one ID, months later.
+
+</td></tr>
+</table>
+
+That's the whole value proposition: **you stop investigating and start deciding.**
 
 ---
 
-## Key Features
+# How it works
 
-- **Deterministic reconciliation engine** — a three-level matching ladder (exact ID → UTR → amount + time proximity) with one-to-one settlement/bank matching. No AI, no floats, no heuristics in the money path.
-- **Typed exception management** — ten exception types modelled, each with a deterministic dedup key so at-least-once webhook delivery can never create duplicate exceptions. Severity is scored on real financial exposure.
-- **AI Finance Controller** — investigates exceptions through **14 read-only, merchant-scoped tools**, returns a root cause with a confidence score, the evidence it used, and a recommended action. Also answers natural-language questions over the merchant's own ledger.
-- **Policy-controlled actions** — `REFUND`, `MARK_REVIEWED`, `ESCALATE` (and `CREATE_PAYMENT_LINK` in the full spec) run a `PROPOSED → PENDING_APPROVAL → APPROVED → EXECUTING → COMPLETED/FAILED` lifecycle. Nothing skips a state.
-- **Event-driven webhook pipeline** — HMAC SHA256 verification against the *unparsed* body, raw event persisted before any processing, immediate `200`, then asynchronous handling via BullMQ with replay protection, stale-event TTL rejection, and unique-`event_id` idempotency.
-- **Multi-tenant by default** — `merchantId` is derived from the JWT server-side and is never accepted from a client. Cross-tenant IDOR is closed in every service *and* in every AI tool.
-- **Complete audit trail** — every state transition, AI analysis (with `prompt_version` and `tool_calls`), policy decision, approval, and execution is logged and correlated by `correlation_id`.
-- **Prompt-injection resistant** — the seed data ships a deliberate injection canary inside a bank-transaction description; the AI layer is expected to ignore it.
-
----
-
-## Architecture
+Four sentences describe the entire architecture, and the order matters:
 
 > **Machines reconcile. AI investigates. Policies control. Humans approve.**
 
-LedgerMind is a **NestJS modular monolith** — nine bounded modules in one deployable, with the asynchronous work pushed onto BullMQ workers. A monolith was chosen deliberately: reconciliation needs transactional reads across all five record types, and distributing that across services would buy nothing but eventual-consistency bugs.
+| Layer | Responsibility | May move money? |
+| --- | --- | --- |
+| Reconciliation Engine | Match, score, classify — deterministic code, integer paise | No |
+| AI Controller | Investigate, explain, propose — read-only tools | **Never** |
+| Policy Engine | Evaluate limits, role, and exposure on every proposal | No |
+| Human approver | Approve or reject | Authorizes |
+| Action Engine | Execute the approved action, write the audit trail | Yes |
+
+That table is a description of the code, not an aspiration. There is no path from the AI module to a financial write — not a forbidden path, an absent one.
+
+## What's in the box
+
+- **Deterministic reconciliation** — a three-level matching ladder (exact ID → UTR → amount + time proximity), one-to-one settlement/bank binding, exposure scored in real money. No model touches arithmetic.
+- **Typed exceptions** — ten types modelled, each with a deterministic dedup key, so at-least-once webhook delivery can't create the same exception twice. Severity comes from financial exposure.
+- **AI investigation** — 14 read-only, merchant-scoped tools. Returns root cause, confidence, evidence, and a recommended action, with `prompt_version` and `tool_calls` persisted for audit.
+- **Policy-controlled actions** — `REFUND`, `MARK_REVIEWED`, `ESCALATE` moving through `PROPOSED → PENDING_APPROVAL → APPROVED → EXECUTING → COMPLETED/FAILED`. No state is skippable.
+- **Event-driven ingestion** — HMAC SHA256 verified against the *unparsed* body, raw event persisted before processing, immediate `200`, then async handling on BullMQ with replay protection, stale-event TTL, and unique-`event_id` idempotency.
+- **Multi-tenant by construction** — `merchantId` derived from the JWT server-side, never accepted from a client, enforced inside every service *and* every AI tool.
+- **Auditable end to end** — every transition, analysis, policy decision, approval, and execution logged and joined by `correlation_id`.
+- **Injection-resistant** — the seed plants an instruction-shaped string in a bank description. It's read as data, because that's what it is.
+
+## Architecture
 
 ```mermaid
 flowchart TB
@@ -144,9 +200,9 @@ flowchart TB
     class POL,ACT gate
 ```
 
-### The core loop
+### One exception, start to finish
 
-Every exception in LedgerMind travels the same path, and the path always ends with a human.
+Every exception travels the same path, and the path always ends with a person.
 
 ```mermaid
 flowchart LR
@@ -176,11 +232,9 @@ flowchart LR
     class I,J aic
 ```
 
-Note the last edge: executing an action produces a *new* webhook, which re-enters reconciliation and auto-resolves the original exception. The loop closes itself.
+Look at the last edge. Executing an action produces a *new* webhook, which re-enters reconciliation and resolves the original exception. The loop closes itself — nobody marks anything done by hand.
 
-📐 **Full diagram set** — matching ladder, AI tool boundary, action state machine, data model, and frontend flow — lives in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
-
----
+📐 **Twelve more diagrams** — matching ladder, trust boundaries, exception classification, state machines, data model, frontend flow — in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Tech Stack
 
@@ -188,11 +242,11 @@ Note the last edge: executing an action produces a *new* webhook, which re-enter
 | --- | --- |
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Recharts, lucide-react |
 | Backend | NestJS 10 (modular monolith), Prisma 5, PostgreSQL 16 |
-| Async | Redis + BullMQ (normalize, reconcile, execute queues) |
-| AI | Google Gemini via `@google/genai` — function calling with read-only tools |
-| Auth | JWT Bearer + role-based access control (`ADMIN`, `FINANCE`, `VIEWER`) |
+| Async | Redis + BullMQ — normalize, reconcile, execute queues |
+| AI | Google Gemini via `@google/genai` — function calling over read-only tools |
+| Auth | JWT Bearer + RBAC (`ADMIN`, `FINANCE`, `VIEWER`) |
 | Validation | Zod (frontend), `class-validator` + `class-transformer` (backend DTOs) |
-| Testing | Jest (unit), Supertest (integration/E2E API), Playwright (browser) |
+| Testing | Jest, Supertest, Playwright |
 | Local infra | Docker Compose — PostgreSQL + Redis |
 | Deployment | Vercel (frontend) · Render / Railway (API + workers) |
 
@@ -202,22 +256,13 @@ Note the last edge: executing an action produces a *new* webhook, which re-enter
 
 ### Prerequisites
 
-- **Node.js ≥ 20** (BigInt `toJSON` patching and Next 14 both assume it)
-- **Docker & Docker Compose** — for PostgreSQL and Redis
-- A **Gemini API key**
+**Node.js ≥ 20**, **Docker & Docker Compose**, and a **Gemini API key**.
 
 ### Setup
-
-**1. Clone and enter the repo**
 
 ```bash
 git clone https://github.com/<your-org>/ledgermind.git
 cd ledgermind
-```
-
-**2. Configure environment**
-
-```bash
 cp .env.example backend/.env
 ```
 
@@ -225,102 +270,81 @@ Fill in the required values:
 
 | Variable | Purpose |
 | --- | --- |
+| `PORT` | API listen port — `3001`, leaving `3000` to the frontend |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis connection string |
-| `JWT_SECRET` | Signing secret for access tokens |
+| `JWT_SECRET` | Access-token signing secret |
 | `GEMINI_API_KEY` | AI Controller model access |
-| `AI_MODEL` | **Must be set to `gemini-3.6-flash` for the hackathon environment.** |
 | `RAZORPAY_WEBHOOK_SECRET` | HMAC SHA256 verification secret |
-| `POLICY_REFUND_MAX_PAISE` | Auto-approval ceiling (policy rules live in env for the MVP) |
+| `POLICY_REFUND_MAX_PAISE` | Refund ceiling the Policy Engine enforces |
 
-**3. Start infrastructure**
-
-```bash
-docker-compose up -d postgres redis
-```
-
-**4. Install dependencies**
+Then bring it up:
 
 ```bash
+docker-compose up -d postgres redis   # infrastructure
 npm install
-```
-
-**5. Migrate and seed the database**
-
-```bash
-npm run prisma:migrate     # uses `prisma migrate dev` — never `db push`
-npm run seed
-```
-
-The seed creates merchants, users, orders, payments, refunds, settlements, and bank transactions across several scenarios. It deliberately **does not create any exceptions** — reconciliation must produce those live.
-
-**6. Run the stack**
-
-```bash
-npm run start:dev
+npm run prisma:migrate                # prisma migrate dev — never db push
+npm run seed                          # records, but deliberately zero exceptions
+npm run start:dev                     # API + workers + frontend
 ```
 
 | Service | URL |
 | --- | --- |
-| Frontend (Dashboard) | http://localhost:3000/ |
+| Frontend | http://localhost:3000 |
 | API | http://localhost:3001/api/v1 |
 
-*Note: The frontend dashboard is mounted at the root (`/`), not at `/dashboard`.*
+The API port comes from `PORT` in `backend/.env`; the frontend finds it via `NEXT_PUBLIC_API_BASE_URL`. Change one and you must change the other. Log in with a seeded user — the seed script prints the credentials. Roles are `ADMIN` (approves actions), `FINANCE` (proposes), `VIEWER` (read-only).
 
-The API port comes from `PORT` in `backend/.env` (defaults to `3001`), and the frontend reads the API location from `NEXT_PUBLIC_API_BASE_URL`. Change one and you must change the other.
+### Making exceptions appear
 
-**7. Log in** with a seeded user. Use **`finance@ledgermind.dev`** / **`demo1234`** for the demo. Roles are `ADMIN` (can approve actions), `FINANCE` (can propose), and `VIEWER` (read-only).
-
-### Injecting demo mismatches
-
-The dashboard starts healthy. To make exceptions appear on cue, inject synthetic bank data that disagrees with the gateway records, then trigger a reconciliation run:
+The dashboard starts clean, because the seed never creates exceptions — reconciliation has to produce them. To inject bank records that disagree with the gateway:
 
 ```bash
 npm run generate:bank-data
 ```
 
-Then hit **Run Reconciliation** in the UI (or `POST /api/v1/reconciliation/run`). New exceptions appear within one 3-second poll.
+Then hit **Run Reconciliation** in the UI, or `POST /api/v1/reconciliation/run`. New exceptions surface within one 3-second poll.
 
 ---
 
 ## API
 
-Base path: **`/api/v1`**. All endpoints require a `Authorization: Bearer <jwt>` header **except** `POST /auth/login` and `POST /webhooks/razorpay`.
+Base path **`/api/v1`**. Everything requires `Authorization: Bearer <jwt>` except `POST /auth/login` and `POST /webhooks/razorpay`.
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `POST` | `/auth/login` | Authenticate; returns JWT. Rate-limited to **5 requests/min** |
-| `GET` | `/dashboard/metrics` | Operational KPIs — volume, reconciliation rate, open/critical exceptions, pending approvals |
-| `GET` | `/transactions` | Unified view across orders, payments, refunds, settlements, bank txns |
-| `GET` | `/exceptions` | List and filter exceptions (`status`, `type`, `severity`, sort, paginate) |
-| `GET` | `/exceptions/:id` | Full exception detail including `analysis` |
-| `GET` | `/exceptions/:id/timeline` | Event timeline, sorted by `occurred_at` (financial event time) |
+| `POST` | `/auth/login` | Authenticate; returns JWT. Rate-limited to **5/min** |
+| `GET` | `/dashboard/metrics` | Volume, reconciliation rate, open and critical exceptions, pending approvals |
+| `GET` | `/transactions` | Unified view across all five record types |
+| `GET` | `/exceptions` | List and filter by status, type, severity |
+| `GET` | `/exceptions/:id` | Full detail, including `analysis` |
+| `GET` | `/exceptions/:id/timeline` | Events sorted by `occurred_at`, not row insert time |
 | `POST` | `/exceptions/:id/investigate` | Run the AI Controller against this exception |
 | `POST` | `/reconciliation/run` | Trigger a reconciliation run |
-| `GET` | `/reconciliation/runs` | Run history with match/exception counts |
-| `POST` | `/ai/chat` | Natural-language query over the merchant's ledger |
+| `GET` | `/reconciliation/runs` | Run history with match and exception counts |
+| `POST` | `/ai/chat` | Natural-language question over your own ledger |
 | `POST` | `/actions` | Propose a financial action |
-| `POST` | `/actions/:id/approve` | Approve a pending action (`ADMIN` only) |
+| `POST` | `/actions/:id/approve` | Approve a pending action — `ADMIN` only |
 | `POST` | `/actions/:id/reject` | Reject a pending action |
-| `POST` | `/webhooks/razorpay` | Razorpay event ingress — HMAC verified, idempotent |
+| `POST` | `/webhooks/razorpay` | Event ingress — HMAC verified, idempotent |
 
 ### Three contract rules that will bite you
 
-**1. Money is integer paise, serialized as strings.** Every monetary field is a PostgreSQL `BIGINT` and crosses the wire as a JSON **string**, because `BigInt` breaks `JSON.stringify`. Parse it with `BigInt` or integer-string math and format paise → rupees in one shared utility. **Never `parseFloat` a money field.**
+**Money is integer paise, serialized as a string.** Every monetary field is a `BIGINT` and crosses the wire as a JSON *string*, because `BigInt` breaks `JSON.stringify`. Parse with `BigInt` or integer-string math and format paise → rupees in one shared utility. **Never `parseFloat` a money field** — floating point isn't closed under decimal arithmetic, and sub-paise drift becomes a false mismatch, which becomes somebody's afternoon.
 
 ```json
 { "amount": "5000000", "currency": "INR" }   // ₹50,000.00
 ```
 
-**2. List endpoints are uniformly shaped**, and `limit` is capped at 100:
+**List responses are uniform, and `limit` caps at 100.**
 
 ```json
 { "data": [ ... ], "total": 248, "page": 1, "limit": 25 }
 ```
 
-**3. `merchantId` is never a request parameter.** It is derived from the JWT server-side on every single call, including inside AI tool execution. A client that sends one is either confused or attacking; the API ignores it either way.
+**`merchantId` is never a request parameter.** It's derived from the JWT on every call, including inside AI tool execution. A client that sends one is confused at best.
 
-Full request/response schemas: **[docs/07-API-SPECIFICATION.md](docs/07-API-SPECIFICATION.md)**.
+Full schemas: **[docs/07-API-SPECIFICATION.md](docs/07-API-SPECIFICATION.md)**.
 
 ---
 
@@ -340,23 +364,23 @@ ledgermind/
 │   │   ├── reconciliation/     # Deterministic matching engine + run lifecycle
 │   │   ├── exception/          # Classification, severity, dedup, timeline
 │   │   ├── ai/                 # Gemini controller + 14 read-only tools
-│   │   ├── policy/             # Policy Engine — evaluates every proposal
+│   │   ├── policy/             # Evaluates every proposal
 │   │   ├── action/             # Proposal → approval → execution
 │   │   ├── audit/              # Correlated audit log
 │   │   └── main.ts             # BigInt toJSON patch + rawBody: true
 │   └── test/
-├── frontend/                   # Next.js dashboard  → see frontend/README.md
+├── frontend/                   # Next.js dashboard → see frontend/README.md
 │   ├── app/                    # App Router routes
 │   ├── components/             # UI + shadcn layer
 │   └── lib/                    # api-client, money formatting, cn()
-├── docs/                       # Full design documentation (15 files)
+├── docs/                       # Design documentation
 ├── scripts/
-│   └── generate-bank-data.ts   # Synthetic mismatch generator for the demo
+│   └── generate-bank-data.ts   # Synthetic mismatch generator
 ├── docker-compose.yml
 └── README.md
 ```
 
-Two conventions worth knowing before you edit anything: the **backend uses ES modules, so relative imports need explicit `.js` extensions**; the **frontend does not** — it uses standard Next.js/webpack resolution and the `@/` alias. And treat the API as **frozen**: the frontend adapts to the contract, not the other way around.
+Two conventions to know before editing: the **backend is ES modules, so relative imports need explicit `.js` extensions**; the **frontend doesn't** — standard Next.js resolution with the `@/` alias. And treat the API as **frozen** — the frontend adapts to the contract, never the reverse.
 
 ---
 
@@ -364,7 +388,7 @@ Two conventions worth knowing before you edit anything: the **backend uses ES mo
 
 | Doc | What it covers |
 | --- | --- |
-| [01-PROBLEM.md](docs/01-PROBLEM.md) | Problem space and why reconciliation investigation is the real cost |
+| [01-PROBLEM.md](docs/01-PROBLEM.md) | Why reconciliation *investigation* is the real cost |
 | [03-REQUIREMENTS.md](docs/03-REQUIREMENTS.md) | Functional and non-functional requirements |
 | [04-USER-FLOWS.md](docs/04-USER-FLOWS.md) | Operator journeys end to end |
 | [05-SYSTEM-ARCHITECTURE.md](docs/05-SYSTEM-ARCHITECTURE.md) | Module boundaries, queues, deployment topology |
@@ -372,64 +396,65 @@ Two conventions worth knowing before you edit anything: the **backend uses ES mo
 | [07-API-SPECIFICATION.md](docs/07-API-SPECIFICATION.md) | Every endpoint, request and response shape |
 | [08-AI-AGENT-SPECIFICATION.md](docs/08-AI-AGENT-SPECIFICATION.md) | Tool catalogue, prompt versioning, safety boundary |
 | [09-PAYMENT-STATE-MACHINE.md](docs/09-PAYMENT-STATE-MACHINE.md) | Legal payment and refund transitions |
-| [10-RECONCILIATION-LOGIC.md](docs/10-RECONCILIATION-LOGIC.md) | Matching ladder, scoring, exception classification |
+| [10-RECONCILIATION-LOGIC.md](docs/10-RECONCILIATION-LOGIC.md) | Matching ladder, scoring, classification |
 | [11-SECURITY.md](docs/11-SECURITY.md) | Auth, tenancy isolation, webhook verification, injection defence |
-| [12-ERROR-HANDLING.md](docs/12-ERROR-HANDLING.md) | Backend error taxonomy and frontend error states (§5) |
+| [12-ERROR-HANDLING.md](docs/12-ERROR-HANDLING.md) | Backend error taxonomy, frontend error states (§5) |
 | [13-TESTING-PLAN.md](docs/13-TESTING-PLAN.md) | Coverage strategy and critical-path tests |
 | [14-BUILDATHON-DEMO.md](docs/14-BUILDATHON-DEMO.md) | The demo script, beat by beat |
-| [DEMO-VIDEO-RUNBOOK.md](docs/DEMO-VIDEO-RUNBOOK.md) | Pre-flight, recording setup, and the timed 5-minute narration script |
-| [15-SYSTEM-DESIGN-CONCEPTS.md](docs/15-SYSTEM-DESIGN-CONCEPTS.md) | The design principles behind the architecture |
-| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | **All flowcharts and design-flow diagrams in one place** |
+| [15-SYSTEM-DESIGN-CONCEPTS.md](docs/15-SYSTEM-DESIGN-CONCEPTS.md) | Design principles behind the architecture |
+| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | **All flowcharts and design-flow diagrams** |
+| **[DEMO-VIDEO-RUNBOOK.md](docs/DEMO-VIDEO-RUNBOOK.md)** | **Pre-flight, recording setup, timed narration script** |
 
 ---
 
 ## Testing
 
 ```bash
-# Unit tests — reconciliation engine and state machines are the priority
-npm run test
-
-# Integration + E2E API tests, including tenancy isolation and IDOR
-npm run test:e2e
-
-# Browser E2E
-npm run test:e2e:ui
-
-# Type check the whole workspace
-npx tsc --noEmit
+npm run test        # Jest unit — matching ladder and state machines first
+npm run test:e2e    # Supertest — auth, RBAC, tenancy isolation, IDOR
+npm run test:e2e:ui # Playwright
+npx tsc --noEmit    # must stay clean
 ```
 
-The tests that matter most are the ones covering the **matching ladder** (a wrong match is a wrong financial conclusion), the **action state machine** (no state may be skipped), and **cross-tenant isolation** (every service and every AI tool must be merchant-scoped).
+Three suites carry the weight. The **matching ladder**, because a wrong match is a wrong financial conclusion delivered with confidence. The **action state machine**, because a skippable state is money moving without approval. And **cross-tenant isolation**, because every service and every AI tool has to be merchant-scoped, and one that isn't is a data breach rather than a bug.
 
 ---
 
-## The Demo, in Seven Beats
+## See it in five beats
 
-The scripted path judges will see, driven by the demo spine — a ₹50,000 payment marked `FAILED` by the gateway while the bank shows a ₹50,000 credit under `UTR-DEMO-001`:
+The scripted path, driven by the demo spine — a **₹50,000 payment the gateway marked `FAILED`** while the bank shows a **₹50,000 credit under `UTR-DEMO-001`**:
 
-1. **A healthy dashboard.** KPI row is green, reconciliation rate high, no open exceptions.
-2. **Inject reality.** `npm run generate:bank-data` writes bank records that disagree with the gateway.
-3. **Reconcile.** Trigger a run. The engine matches what it can and classifies what it can't.
-4. **An exception appears.** `BANK_PAYMENT_MISMATCH`, critical severity, ₹50,000 of exposure — surfaced in *Needs Attention* within one poll.
-5. **Investigate.** The AI Controller reads the order, payment, and bank transaction through read-only tools and reports the root cause with a confidence score and its evidence trail.
-6. **Propose, then approve.** The AI proposes an action. The Policy Engine evaluates it. An `ADMIN` approves it — and only then does anything move.
-7. **Close the loop.** The Action Engine executes, the audit trail is complete and correlated, the resulting webhook re-reconciles, and the exception resolves itself.
+1. **A clean queue.** KPI row green, nothing needing attention. This is what reconciled looks like.
+2. **Reality arrives.** `npm run generate:bank-data` writes bank records that disagree with the gateway, then a reconciliation run sorts what it can and classifies what it can't.
+3. **One exception, at the top.** `BANK_PAYMENT_MISMATCH`, critical, ₹50,000 of exposure — first because it's expensive, not because it's new.
+4. **The investigation is already done.** Root cause, confidence, and every record it read. Including the bank description with an instruction-shaped string in it, which it correctly treated as text.
+5. **Someone says yes.** Policy evaluates, an `ADMIN` approves, the action executes, the audit trail closes, and the resulting webhook reconciles the exception away.
 
-Full script: **[docs/14-BUILDATHON-DEMO.md](docs/14-BUILDATHON-DEMO.md)**.
+Full script: **[docs/14-BUILDATHON-DEMO.md](docs/14-BUILDATHON-DEMO.md)** · Recording it: **[docs/DEMO-VIDEO-RUNBOOK.md](docs/DEMO-VIDEO-RUNBOOK.md)**
 
 ---
 
-## Design Decisions Worth Defending
+## Decisions worth defending
 
-**Why a deterministic engine instead of letting the AI reconcile?** Because a language model that computes a financial difference will eventually compute it wrong, and there is no way to audit that. Matching, scoring, and exposure calculation are pure code with tests. The AI never touches arithmetic.
+**Why not let the AI reconcile?** A language model that computes a financial difference will eventually compute one wrong, and there'd be no way to audit it. Matching, scoring, and exposure are pure code with tests. The model never does arithmetic on money.
 
-**Why can't the AI execute anything?** The AI has read-only tools plus proposal tools. That isn't a prompt instruction the model could be talked out of — it is the shape of the tool surface. There is no code path from the AI module to Razorpay or to a financial write.
+**Why can't the AI execute anything?** It has read-only tools and one place it can write — a proposal. That isn't a prompt instruction it could be talked out of; it's the shape of the tool surface. No code path exists from the AI module to a financial write.
 
-**Why integer paise everywhere?** Floating point is not closed under decimal arithmetic. `0.1 + 0.2 !== 0.3`. In reconciliation, sub-paise drift becomes a false mismatch, and a false mismatch becomes an operator's afternoon.
+**Why integer paise everywhere?** Because `0.1 + 0.2 !== 0.3`, and in reconciliation that rounding error is indistinguishable from a real mismatch.
 
-**Why idempotency on everything?** Webhook delivery is at-least-once, so duplicates are not an edge case, they are the normal case. `webhook_events.event_id`, `actions.idempotency_key`, and `exceptions.dedup_key` are all unique constraints — the database refuses to double-count rather than trusting the application to remember.
+**Why idempotency on everything?** Webhook delivery is at-least-once, so duplicates are the normal case, not the edge case. `webhook_events.event_id`, `actions.idempotency_key`, and `exceptions.dedup_key` are unique constraints — the database refuses to double-count rather than trusting the application to remember.
 
 **Why a monolith?** Reconciliation reads across all five record types in one transaction. Splitting that into services would trade a solved consistency problem for an unsolved one.
+
+---
+
+## Why this matters
+
+Financial systems already generate more than enough noise. Every integration adds another feed, every feed adds another version of the truth, and the person in the middle is left assembling meaning by hand from records that were never designed to explain themselves.
+
+The point isn't to remove that person. It's to stop spending them on work a machine can do — the cross-referencing, the tab-juggling, the fourth investigation of the same pattern this week — and leave them the part that actually needs judgment: deciding what to do about the money.
+
+**Machines reconcile. AI investigates. Policies control. Humans approve.**
 
 ---
 
