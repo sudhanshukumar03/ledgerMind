@@ -373,7 +373,7 @@ export class ActionsService {
       create: {
         refundId: refund.id,
         merchantId: action.merchantId,
-        paymentId: await this.resolvePaymentPkId(params.payment_id, action.merchantId),
+        paymentId: params.payment_id,
         amount: BigInt(refund.amount),
         status: 'PROCESSING',
       },
