@@ -23,7 +23,12 @@ frontend/
    npm install lucide-react
    ```
 3. Make sure Tailwind's `content` globs in `tailwind.config.ts` include the `components/` and `app/` folders (default in any `create-next-app` scaffold).
-4. Run `npm run dev` and visit `/dashboard`.
+4. Run `npm run dev` and visit `http://localhost:3000/dashboard`.
+
+## Default Ports
+
+- **Frontend**: Runs on `http://localhost:3000`
+- **Backend**: Runs on `http://localhost:3001` (ensure your `.env` is configured correctly)
 
 No Tailwind config changes are required — exact design-token colors (`#0F172A`, `#475569`, `#1D4ED8`, `#15803D`, `#B45309`, `#B91C1C`, `#F8FAFC`) are applied via inline `style` props rather than custom Tailwind classes, so the palette renders correctly regardless of your Tailwind theme config. If you'd rather have them as first-class Tailwind classes (e.g. `bg-critical`), extend `tailwind.config.ts` `theme.colors` with the same hex values and swap the inline `style={{ color: C.critical }}` calls for `className="text-critical"` — the `C` token object at the top of the component is the single place to do that swap.
 
