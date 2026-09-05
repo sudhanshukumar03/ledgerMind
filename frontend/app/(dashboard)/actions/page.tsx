@@ -32,8 +32,8 @@ function ActionRow({ action, onReview, canApprove }: {
             {TYPE_ICONS[action.type] ?? <span className="text-sm font-bold">•</span>}
           </div>
           <div className="min-w-0">
-            <div className="text-[13px] font-medium" style={{ color: C.textPrimary }}>{action.type.replace(/_/g, ' ')}</div>
-            <div className="text-[12px] font-mono truncate max-w-[200px]" style={{ color: C.textMuted }}>{action.exceptionId}</div>
+            <div className="text-[13px] font-medium" style={{ color: C.textPrimary }}>{(action.type || 'UNKNOWN').replace(/_/g, ' ')}</div>
+            <div className="text-[12px] font-mono truncate max-w-[200px]" style={{ color: C.textMuted }}>{action.exceptionId || '—'}</div>
           </div>
         </div>
       </td>
@@ -45,7 +45,7 @@ function ActionRow({ action, onReview, canApprove }: {
         {action.reason}
       </td>
       <td className="px-4 py-3 text-[13px]" style={{ color: C.textSecondary }}>
-        {new Date(action.createdAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+        {action.createdAt ? new Date(action.createdAt).toLocaleDateString('en-US', { dateStyle: 'medium' }) : '—'}
       </td>
       <td className="px-4 py-3 text-right">
         {isPending && canApprove && (
@@ -73,7 +73,13 @@ export default function ActionsPage() {
   const { data: actions = [], isLoading: loading, mutate } = useSWR(
     ['actions', statusFilter],
     () => actionsApi.list(statusFilter ? { status: statusFilter } : undefined)
-            .then(r => r.data as any),
+            .then(r => (r.data as any[]).map(item => ({
+              ...item,
+              type: item.actionType,
+              reason: item.parameters?.reason || '',
+              amount: item.parameters?.amount,
+              exceptionId: item.exception?.exceptionId || item.exceptionId
+            }))),
     { fallbackData: [] }
   );
 
@@ -86,7 +92,7 @@ export default function ActionsPage() {
   const pendingCount = actions.filter(a => a.status === 'PENDING_APPROVAL' || a.status === 'PROPOSED').length;
 
   return (
-    <div className="flex flex-col h-full bg-bg">
+    <div className="flex flex-col min-h-full bg-bg">
       <Header 
         title="Actions" 
         action={
@@ -102,7 +108,7 @@ export default function ActionsPage() {
         }
       />
 
-      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
+      <div className="flex-1 p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
         
         {msg && (
           <div 
