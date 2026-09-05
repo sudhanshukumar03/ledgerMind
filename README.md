@@ -14,6 +14,13 @@
 ![Redis](https://img.shields.io/badge/Redis-BullMQ-DC382D?logo=redis&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-14B8A6)
 
+<br/>
+<br/>
+
+![LedgerMind Dashboard](docs/assets/dashboard.png)
+<br/>
+![AI Investigation View](docs/assets/investigation.png)
+
 </div>
 
 ---
