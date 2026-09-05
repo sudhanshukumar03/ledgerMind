@@ -320,13 +320,16 @@ export class ActionsService {
     const params = action.parameters as { payment_id?: string; amount?: number; reason?: string };
 
     if (!params.payment_id) {
-      // Attempt to infer from exception events
-      const paymentEvent = await this.prisma.exceptionEvent.findFirst({
-        where: { exceptionId: action.exceptionId, entityType: 'PAYMENT' }
-      });
-      if (paymentEvent && paymentEvent.entityId) {
-        params.payment_id = paymentEvent.entityId;
-      } else {
+      if (action.exception) {
+        if (action.exception.primaryEntityType === 'PAYMENT') {
+          params.payment_id = action.exception.primaryEntityId;
+        } else if (action.exception.primaryEntityType === 'ORDER') {
+          const p = await this.prisma.payment.findFirst({ where: { orderId: action.exception.primaryEntityId } });
+          if (p) params.payment_id = p.id;
+        }
+      }
+      
+      if (!params.payment_id) {
         throw new BadRequestException('Refund action missing payment_id in parameters and could not be inferred');
       }
     }
