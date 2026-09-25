@@ -83,13 +83,19 @@ describe('Webhooks (e2e)', () => {
 
   it('rejects (HTTP 200, reason: stale_webhook) when payload created_at is >5min old', async () => {
     const staleCreatedAt = Math.floor((Date.now() - 6 * 60 * 1000) / 1000);
-    const payload = JSON.stringify({ event: 'payment.captured', event_id: 'evt_4', created_at: staleCreatedAt });
+    // Unique id so a leftover row from a prior run can't shadow this as a duplicate.
+    const eventId = `evt_stale_${Date.now()}`;
+    const payload = JSON.stringify({ event: 'payment.captured', event_id: eventId, created_at: staleCreatedAt });
     const res = await request(app.getHttpServer())
       .post('/api/v1/webhooks/razorpay')
       .set('x-razorpay-signature', sign(payload, secret))
       .send(payload)
       .expect(200);
     expect(res.body.reason).toBe('stale_webhook');
+
+    // The stored event is marked stale, not left dangling in PENDING.
+    const stored = await prisma.webhookEvent.findUnique({ where: { eventId } });
+    expect(stored?.processingStatus).toBe('IGNORED_STALE');
   });
 
   it('accepts a valid signature + fresh timestamp, stores and enqueues the event', async () => {

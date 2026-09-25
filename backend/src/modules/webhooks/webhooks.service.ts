@@ -81,6 +81,18 @@ export class WebhooksService {
   }
 
   /**
+   * Mark a freshly-stored event as stale so it is not left dangling in PENDING
+   * (stale events are never enqueued). Only PENDING rows are touched, so a
+   * duplicate already marked IGNORED_DUPLICATE / a PROCESSED event is untouched.
+   */
+  async markStale(webhookEventId: string) {
+    await this.prisma.webhookEvent.updateMany({
+      where: { id: webhookEventId, processingStatus: WebhookProcessingStatus.PENDING },
+      data: { processingStatus: WebhookProcessingStatus.IGNORED_STALE },
+    });
+  }
+
+  /**
    * Fetch paginated webhook events for a merchant (or all if not specified, though merchant isolation is preferred).
    */
   async findAll(merchantId: string, page: number = 1, limit: number = 20) {

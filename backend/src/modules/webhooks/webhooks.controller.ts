@@ -47,6 +47,9 @@ export class WebhooksController {
             // non-JSON body already captured for audit above
         }
         if (createdAt !== undefined && Date.now() - createdAt > fiveMinutes) {
+            // Mark the persisted event so it isn't left dangling in PENDING
+            // (it is never enqueued). Duplicates keep their existing status.
+            await this.webhooksService.markStale(event.id);
             return { status: 'rejected', reason: 'stale_webhook' };
         }
 
