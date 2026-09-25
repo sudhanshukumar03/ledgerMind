@@ -17,7 +17,17 @@ async function bootstrap() {
   });
 
   app.use(helmet());
-  app.use(json({ limit: '100kb' }));
+  // Capture the raw body on the request so webhook HMAC verification can run
+  // against the exact bytes. A bare json() parser consumes the stream before
+  // Nest's rawBody capture, leaving req.rawBody empty — so stash it here.
+  app.use(
+    json({
+      limit: '100kb',
+      verify: (req: any, _res, buf: Buffer) => {
+        req.rawBody = buf;
+      },
+    }),
+  );
 
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));

@@ -38,7 +38,9 @@ describe('Security (e2e)', () => {
       })
       .compile();
 
-    app = moduleFixture.createNestApplication();
+    // rawBody must be captured so webhook HMAC verification runs against the
+    // exact bytes, matching the production bootstrap in main.ts.
+    app = moduleFixture.createNestApplication({ rawBody: true } as any);
     await app.init();
 
     prisma = app.get<PrismaService>(PrismaService);
@@ -150,19 +152,20 @@ describe('Security (e2e)', () => {
     expect(response.status).toBe(429);
   });
 
-  it('5. Webhook freshness (stale timestamps older than 5 mins are rejected)', async () => {
-    const staleTimestamp = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
-    const payload = JSON.stringify({ event: 'payment.failed' });
+  it('5. Webhook freshness (stale created_at older than 5 mins are rejected)', async () => {
+    // Razorpay signs the raw body and sends no timestamp header, so staleness
+    // is derived from the payload's `created_at` (seconds) after signature check.
+    const staleCreatedAt = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+    const payload = JSON.stringify({ event: 'payment.failed', created_at: staleCreatedAt });
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET || 'test_secret';
     const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
 
     const response = await request(app.getHttpServer())
       .post('/webhooks/razorpay')
       .set('x-razorpay-signature', signature)
-      .set('x-razorpay-timestamp', staleTimestamp.toString())
       .send(payload)
       .type('json');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.reason).toBe('stale_webhook');
   });

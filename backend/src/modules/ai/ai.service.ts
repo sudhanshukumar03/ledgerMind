@@ -54,11 +54,15 @@ CRITICAL CONSTRAINTS:
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private client: OpenAI;
+  private readonly model: string;
 
   constructor(private readonly prisma: PrismaService) {
     if (!process.env.GROQ_API_KEY) {
       throw new Error('GROQ_API_KEY is not set');
     }
+    // Fail loudly at startup rather than silently returning the "technical
+    // difficulties" fallback on every call when AI_MODEL is unset.
+    this.model = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
     this.client = new OpenAI({
       baseURL: 'https://api.groq.com/openai/v1',
       apiKey: process.env.GROQ_API_KEY,
@@ -232,24 +236,6 @@ export class AiService {
         };
       }
 
-      case 'get_dashboard_stats': {
-        const where: Prisma.ExceptionWhereInput = { merchantId, status: 'OPEN' };
-        if (args.severity) where.severity = args.severity as Severity;
-        const exceptions = await this.prisma.exception.findMany({
-          where,
-          take: Math.min((args.limit as number) ?? 10, 10),
-          orderBy: [{ severity: 'asc' }, { createdAt: 'asc' }],
-        });
-        return this.safe(exceptions.map(e => ({
-          exception_id: e.exceptionId,
-          type: e.type,
-          severity: e.severity,
-          status: e.status,
-          financial_impact_paise: e.financialImpact,
-          seen: `${e.occurrenceCount}x`
-        })));
-      }
-
       case 'list_open_exceptions': {
         const where: Prisma.ExceptionWhereInput = { merchantId, status: 'OPEN' };
         if (args.severity) where.severity = args.severity as Severity;
@@ -334,7 +320,7 @@ export class AiService {
         recommendedAction: analysisResult.recommended_action ?? 'MANUAL_REVIEW',
         evidenceChain: analysisResult.evidence_chain ?? [],
         nextSteps: analysisResult.next_steps ?? [],
-        model: process.env.AI_MODEL || 'qwen/qwen3.8-27b',
+        model: this.model,
         promptVersion: '2.0',
         toolCalls: toolCallLog as Prisma.InputJsonValue[],
       },
@@ -374,8 +360,8 @@ export class AiService {
     // In Groq/OpenAI, we just pass the messages directly.
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [...userMessages] as any;
     
-    const model = process.env.AI_MODEL || 'qwen/qwen3.8-27b';
-    
+    const model = this.model;
+
     const toolsToPass = allowedTools 
       ? AI_TOOLS.filter(t => allowedTools.includes(t.function.name))
       : AI_TOOLS;

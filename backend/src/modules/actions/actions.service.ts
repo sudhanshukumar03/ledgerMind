@@ -355,6 +355,9 @@ export class ActionsService {
     }
 
     const refundAmount = BigInt(params.amount ?? 0);
+    if (refundAmount <= BigInt(0)) {
+      throw new BadRequestException('Refund amount must be a positive number of paise');
+    }
     if (refundAmount > payment.amount) {
       throw new BadRequestException(
         `Refund amount ${refundAmount} exceeds original payment amount ${payment.amount}`,
@@ -426,24 +429,6 @@ export class ActionsService {
       },
     });
     return { escalated: true, newSeverity: 'CRITICAL', newStatus: 'INVESTIGATING' };
-  }
-
-  // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Resolve the internal PK of a Payment row from its Razorpay payment_id.
-   */
-  private async resolvePaymentPkId(razorpayPaymentId: string, merchantId: string): Promise<string> {
-    const payment = await this.prisma.payment.findFirst({
-      where: { paymentId: razorpayPaymentId, merchantId },
-      select: { id: true },
-    });
-    if (!payment) {
-      throw new NotFoundException(
-        `Payment with Razorpay ID ${razorpayPaymentId} not found for merchant ${merchantId}`,
-      );
-    }
-    return payment.id;
   }
 }
 

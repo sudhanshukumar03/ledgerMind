@@ -35,16 +35,25 @@ export class WebhooksService {
     }
 
     const fallbackId = `fallback-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const key = eventId ?? fallbackId;
 
-    const event = await this.prisma.webhookEvent.upsert({
-      where: { eventId: eventId ?? fallbackId },
-      update: {
-        // Duplicate event: update signature status and mark ignored
-        signatureVerified: signatureValid,
-        processingStatus: WebhookProcessingStatus.IGNORED_DUPLICATE,
-      },
-      create: {
-        eventId: eventId ?? fallbackId,
+    // Guard against audit tampering: a caller replaying a KNOWN event_id with an
+    // invalid signature must not be able to downgrade an already-verified /
+    // processed event. Only the first write (create) records the signature
+    // outcome; subsequent deliveries are marked duplicate without clobbering it.
+    const existing = await this.prisma.webhookEvent.findUnique({ where: { eventId: key } });
+
+    if (existing) {
+      await this.prisma.webhookEvent.update({
+        where: { eventId: key },
+        data: { processingStatus: WebhookProcessingStatus.IGNORED_DUPLICATE },
+      });
+      return existing;
+    }
+
+    const event = await this.prisma.webhookEvent.create({
+      data: {
+        eventId: key,
         eventType: parsed.event ?? 'unknown',
         payload: parsed,
         signatureVerified: signatureValid,
@@ -77,9 +86,11 @@ export class WebhooksService {
   async findAll(merchantId: string, page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
     
-    // In our schema, merchantId is optional on WebhookEvent. 
-    // We should show events that belong to the merchant or are global.
-    const where = merchantId ? { OR: [{ merchantId }, { merchantId: null }] } : {};
+    // Scope strictly to the merchant. WebhookEvent.merchantId is populated by
+    // the processor once the underlying entity is resolved; unattributed events
+    // (merchantId null) are NOT surfaced cross-tenant to avoid leaking another
+    // merchant's payment data.
+    const where = { merchantId };
 
     const [total, data] = await Promise.all([
       this.prisma.webhookEvent.count({ where }),

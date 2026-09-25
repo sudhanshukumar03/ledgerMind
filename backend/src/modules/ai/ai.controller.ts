@@ -26,7 +26,7 @@ export class AiController {
   @Get('config')
   getConfig() {
     return {
-      model: process.env.AI_MODEL || 'qwen/qwen3.8-27b',
+      model: process.env.AI_MODEL || 'llama-3.3-70b-versatile',
       toolCount: AI_TOOLS.length
     };
   }
