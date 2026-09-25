@@ -68,21 +68,25 @@ describe('Webhooks (e2e)', () => {
     expect(res.body.reason).toBe('invalid_signature');
   });
 
-  it('rejects (HTTP 200, reason: stale_webhook) when timestamp is missing', async () => {
+  // Razorpay does NOT send an x-razorpay-timestamp header on webhooks, so
+  // staleness is derived from the payload's `created_at` (seconds). A valid
+  // signature is required first; freshness is only evaluated after it passes.
+  it('accepts when the payload carries no created_at (no timestamp header sent)', async () => {
     const payload = JSON.stringify({ event: 'payment.captured', event_id: 'evt_3' });
     const res = await request(app.getHttpServer())
       .post('/api/v1/webhooks/razorpay')
+      .set('x-razorpay-signature', sign(payload, secret))
       .send(payload)
       .expect(200);
-    expect(res.body).toEqual({ status: 'rejected', reason: 'stale_webhook' });
+    expect(res.body).toEqual({ status: 'accepted' });
   });
 
-  it('rejects (HTTP 200, reason: stale_webhook) when timestamp is >5min old', async () => {
-    const staleTs = Math.floor((Date.now() - 6 * 60 * 1000) / 1000).toString();
-    const payload = JSON.stringify({ event: 'payment.captured', event_id: 'evt_4' });
+  it('rejects (HTTP 200, reason: stale_webhook) when payload created_at is >5min old', async () => {
+    const staleCreatedAt = Math.floor((Date.now() - 6 * 60 * 1000) / 1000);
+    const payload = JSON.stringify({ event: 'payment.captured', event_id: 'evt_4', created_at: staleCreatedAt });
     const res = await request(app.getHttpServer())
       .post('/api/v1/webhooks/razorpay')
-      .set('x-razorpay-timestamp', staleTs)
+      .set('x-razorpay-signature', sign(payload, secret))
       .send(payload)
       .expect(200);
     expect(res.body.reason).toBe('stale_webhook');

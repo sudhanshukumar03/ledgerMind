@@ -34,7 +34,8 @@ export class WebhooksController {
         // 4. Replay protection: reject clearly stale events. Razorpay does NOT
         //    send a timestamp header on webhooks, so derive the event time from
         //    the payload's `created_at` (seconds). When absent, we rely on the
-        //    unique event_id upsert + PENDING-only processing for idempotency.
+        //    unique event_id (find-then-create) + PENDING-only processing for
+        //    idempotency.
         const fiveMinutes = 5 * 60 * 1000;
         let createdAt: number | undefined;
         try {
