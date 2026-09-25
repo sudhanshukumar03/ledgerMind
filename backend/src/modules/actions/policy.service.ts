@@ -33,7 +33,7 @@ export class PolicyService {
       if (amount > this.autoApproveBelowAmount) {
         // Requires approval from admin or finance
         if (action.userRole === Role.VIEWER) {
-          return { allowed: false, approvalRequired: true, reason: 'Viewer cannot request refunds' };
+          return { allowed: false, approvalRequired: false, reason: 'Viewer cannot request refunds' };
         }
         return { allowed: true, approvalRequired: true };
       } else {
