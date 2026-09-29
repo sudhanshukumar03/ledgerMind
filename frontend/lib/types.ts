@@ -86,11 +86,27 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * A structured action the AI proposes. Never executed by the AI — the
+ * operator submits it via POST /actions where policy + human approval apply.
+ * ids are already resolved to internal UUIDs so it can be POSTed directly.
+ */
+export interface AiProposal {
+  action_type: 'REFUND' | 'CREATE_PAYMENT_LINK' | 'MARK_REVIEWED';
+  exception_id: string | null;
+  payment_id?: string;
+  order_id?: string;
+  amount?: number; // paise
+  reason: string;
+  requires_approval: true;
+}
+
 export interface ChatResponse {
   message: string;
   tool_calls_made: number;
   tool_calls?: { tool: string; args: any; result: any }[];
   suggested_actions: string[];
+  proposals?: AiProposal[];
 }
 
 export interface Payment {

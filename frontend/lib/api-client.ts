@@ -97,7 +97,7 @@ export const actionsApi = {
 export const aiApi = {
   chat: (messages: ChatMessage[]) =>
     api.post<ChatResponse>('/ai/chat', { messages }),
-  getConfig: () => api.get<{ model: string }>('/ai/config'),
+  getConfig: () => api.get<{ model: string; toolCount: number }>('/ai/config'),
 };
 
 // ─── Transactions ─────────────────────────────────────────────────────────────

@@ -13,6 +13,22 @@ const AiAnalysisSchema = z.object({
   next_steps: z.array(z.string()).optional().default([]),
 });
 
+/**
+ * A structured, machine-actionable action the AI proposes. This is NEVER
+ * executed by the AI — it is surfaced to the operator, who submits it via
+ * POST /api/v1/actions where the Policy Engine + human approval gate apply.
+ * All ids are resolved to internal UUIDs so the frontend can POST directly.
+ */
+export interface AiProposal {
+  action_type: 'REFUND' | 'CREATE_PAYMENT_LINK' | 'MARK_REVIEWED';
+  exception_id: string | null; // internal UUID; null when no exception could be resolved
+  payment_id?: string; // internal UUID (REFUND)
+  order_id?: string; // external Razorpay order id (CREATE_PAYMENT_LINK)
+  amount?: number; // paise (integer)
+  reason: string;
+  requires_approval: true;
+}
+
 // ─── Tool definitions (per docs/08-AI-AGENT-SPECIFICATION.md) ────────────────
 // All tools are READ-ONLY. The AI is NOT a source of financial truth and must
 // never mutate records directly. Mutations go through the Action Engine.
@@ -25,11 +41,13 @@ export const AI_TOOLS = [
   { type: 'function', function: { name: 'find_related_transactions', description: 'Find related txns', parameters: { type: 'object', properties: { transaction_id: { type: 'string' } }, required: ['transaction_id'] } } },
   { type: 'function', function: { name: 'get_exception', description: 'Get exception', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
   { type: 'function', function: { name: 'get_customer_history', description: 'Get customer history', parameters: { type: 'object', properties: { customer_id: { type: 'string' }, limit: { type: 'number' } }, required: ['customer_id'] } } },
-  { type: 'function', function: { name: 'get_merchant_history', description: 'Get merchant history', parameters: { type: 'object', properties: { merchant_id: { type: 'string' }, limit: { type: 'number' } }, required: ['merchant_id'] } } },
+  { type: 'function', function: { name: 'get_merchant_history', description: 'Get history for the authenticated merchant. NOTE: the merchant_id argument is ignored — results are always scoped to your own merchant for tenant isolation.', parameters: { type: 'object', properties: { merchant_id: { type: 'string' }, limit: { type: 'number' } }, required: [] } } },
   { type: 'function', function: { name: 'calculate_exposure', description: 'Calc exposure', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
   { type: 'function', function: { name: 'create_resolution_plan', description: 'Suggest plan', parameters: { type: 'object', properties: { exception_id: { type: 'string' } }, required: ['exception_id'] } } },
   { type: 'function', function: { name: 'list_open_exceptions', description: 'List open exceptions', parameters: { type: 'object', properties: { severity: { type: 'string', enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] }, limit: { type: 'number' } }, required: [] } } },
   { type: 'function', function: { name: 'get_reconciliation_run', description: 'Get run', parameters: { type: 'object', properties: { run_id: { type: 'string' } }, required: ['run_id'] } } },
+  { type: 'function', function: { name: 'request_refund', description: 'PROPOSE a refund on a payment for human approval. This does NOT execute — it returns a structured proposal that a human must approve via the Action Engine. Amount is in paise.', parameters: { type: 'object', properties: { payment_id: { type: 'string' }, amount: { type: 'number', description: 'Refund amount in paise (positive integer)' }, reason: { type: 'string' }, exception_id: { type: 'string', description: 'The related exception, so the proposal can be linked for approval' } }, required: ['payment_id', 'amount', 'reason'] } } },
+  { type: 'function', function: { name: 'create_payment_link', description: 'PROPOSE creating a payment link for an order for human approval. This does NOT execute — it returns a structured proposal that a human must approve via the Action Engine. Amount is in paise.', parameters: { type: 'object', properties: { order_id: { type: 'string' }, amount: { type: 'number', description: 'Amount in paise (positive integer)' }, reason: { type: 'string' }, exception_id: { type: 'string', description: 'The related exception, so the proposal can be linked for approval' } }, required: ['order_id', 'amount'] } } },
   { type: 'function', function: { name: 'mark_for_review', description: 'Propose review', parameters: { type: 'object', properties: { exception_id: { type: 'string' }, reason: { type: 'string' } }, required: ['exception_id', 'reason'] } } }
 ];
 
@@ -262,12 +280,70 @@ export class AiService {
         return this.safe(run) ?? { error: 'Run not found' };
       }
 
+      case 'request_refund': {
+        // PROPOSAL ONLY — never executes. Validates and resolves ids so the
+        // operator can submit the returned proposal straight to the Action
+        // Engine (POST /actions), where policy + human approval apply.
+        const paymentRef = args.payment_id as string | undefined;
+        const amount = typeof args.amount === 'number' ? args.amount : Number(args.amount);
+        if (!paymentRef) return { error: 'payment_id is required to propose a refund' };
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return { error: 'amount must be a positive integer number of paise' };
+        }
+        const payment = await this.prisma.payment.findFirst({
+          where: { ...(isUuid(paymentRef) ? { id: paymentRef } : { paymentId: paymentRef }), merchantId },
+        });
+        if (!payment) return { error: 'Payment not found' };
+        if (BigInt(amount) > payment.amount) {
+          return { error: `Refund amount (${amount} paise) exceeds payment amount (${payment.amount} paise)` };
+        }
+        const exceptionUuid = await this.resolveExceptionId(args.exception_id as string | undefined, merchantId);
+        return {
+          proposed_action: 'REFUND',
+          action_type: 'REFUND',
+          exception_id: exceptionUuid,
+          payment_id: payment.id,
+          amount,
+          reason: (args.reason as string) ?? 'AI-proposed refund',
+          requires_approval: true,
+          note: 'Proposal only — not executed. Submit via POST /api/v1/actions to start the approval workflow.',
+        };
+      }
+
+      case 'create_payment_link': {
+        // PROPOSAL ONLY — never executes.
+        const orderRef = args.order_id as string | undefined;
+        const amount = typeof args.amount === 'number' ? args.amount : Number(args.amount);
+        if (!orderRef) return { error: 'order_id is required to propose a payment link' };
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return { error: 'amount must be a positive integer number of paise' };
+        }
+        const order = await this.prisma.order.findFirst({
+          where: { ...(isUuid(orderRef) ? { id: orderRef } : { orderId: orderRef }), merchantId },
+        });
+        if (!order) return { error: 'Order not found' };
+        const exceptionUuid = await this.resolveExceptionId(args.exception_id as string | undefined, merchantId);
+        return {
+          proposed_action: 'CREATE_PAYMENT_LINK',
+          action_type: 'CREATE_PAYMENT_LINK',
+          exception_id: exceptionUuid,
+          order_id: order.orderId,
+          amount,
+          reason: (args.reason as string) ?? 'AI-proposed payment link',
+          requires_approval: true,
+          note: 'Proposal only — not executed. Submit via POST /api/v1/actions to start the approval workflow.',
+        };
+      }
+
       case 'mark_for_review': {
         // READ-ONLY: just return the proposed action — not executed
+        const exceptionUuid = await this.resolveExceptionId(args.exception_id as string | undefined, merchantId);
         return {
           proposed_action: 'MARK_REVIEWED',
-          exception_id: args.exception_id,
-          reason: args.reason,
+          action_type: 'MARK_REVIEWED',
+          exception_id: exceptionUuid,
+          reason: (args.reason as string) ?? 'AI-proposed manual review',
+          requires_approval: true,
           note: 'Proposal only. Submit via POST /api/v1/actions to initiate the approval workflow.',
         };
       }
@@ -279,7 +355,7 @@ export class AiService {
 
   // ─── Public API ───────────────────────────────────────────────────────────
 
-  async investigateException(exceptionId: string, merchantId: string) {
+  async investigateException(exceptionId: string, merchantId: string, userId?: string) {
     const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
     const exception = await this.prisma.exception.findFirst({
       where: isUuid(exceptionId) ? { id: exceptionId, merchantId } : { exceptionId: exceptionId, merchantId },
@@ -326,10 +402,26 @@ export class AiService {
       },
     });
 
+    // Audit the AI recommendation (read-only advice — no mutation happened).
+    await this.writeAiAudit(
+      merchantId,
+      userId,
+      'AI_INVESTIGATION',
+      'EXCEPTION',
+      exception.id,
+      {
+        analysis_id: saved.id,
+        recommended_action: analysisResult.recommended_action,
+        confidence: analysisResult.confidence,
+        tool_calls_made: toolCallLog.length,
+      } as Prisma.InputJsonValue,
+      `AI investigation of ${exception.exceptionId}`,
+    );
+
     return { analysis_id: saved.id, ...analysisResult };
   }
 
-  async chat(userMessages: { role: string; content: string }[], merchantId: string) {
+  async chat(userMessages: { role: string; content: string }[], merchantId: string, userId?: string) {
     const messages: { role: string; content: string }[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       ...userMessages,
@@ -337,11 +429,31 @@ export class AiService {
 
     const { finalMessage, toolCallLog } = await this.runToolLoop(messages, merchantId);
 
+    const proposals = this.extractProposals(toolCallLog);
+
+    // Audit any actionable proposals the AI surfaced in this turn.
+    if (proposals.length > 0) {
+      const lastUser = [...userMessages].reverse().find((m) => m.role === 'user');
+      await this.writeAiAudit(
+        merchantId,
+        userId,
+        'AI_PROPOSAL',
+        'AI_CHAT',
+        null,
+        {
+          proposals,
+          prompt: lastUser?.content?.slice(0, 500),
+        } as unknown as Prisma.InputJsonValue,
+        `AI proposed ${proposals.length} action(s) for human approval`,
+      );
+    }
+
     return {
       message: finalMessage.content,
       tool_calls_made: toolCallLog.length,
       tool_calls: toolCallLog,
       suggested_actions: this.extractSuggestedActions(finalMessage.content as string),
+      proposals,
     };
   }
 
@@ -479,6 +591,77 @@ export class AiService {
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
+  /** Resolve an exception reference (human EXC-id or UUID) to its internal
+   *  UUID, scoped to the merchant. Returns null when it can't be resolved so
+   *  a proposal is still surfaced but flagged as un-submittable. */
+  private async resolveExceptionId(ref: string | undefined, merchantId: string): Promise<string | null> {
+    if (!ref) return null;
+    const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    const exc = await this.prisma.exception.findFirst({
+      where: isUuid(ref) ? { id: ref, merchantId } : { exceptionId: ref, merchantId },
+      select: { id: true },
+    });
+    return exc?.id ?? null;
+  }
+
+  /** Write an audit trail entry for an AI decision. Failures here must never
+   *  break the AI response, so they are swallowed with a warning. */
+  private async writeAiAudit(
+    merchantId: string,
+    userId: string | undefined,
+    action: string,
+    entityType: string,
+    entityId: string | null,
+    afterState: Prisma.InputJsonValue,
+    reason?: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          merchantId,
+          userId: userId ?? null,
+          actorType: 'AI',
+          action,
+          entityType,
+          entityId,
+          afterState,
+          reason,
+        },
+      });
+    } catch (e: unknown) {
+      this.logger.warn(`Failed to write AI audit log (${action}): ${(e as Error).message}`);
+    }
+  }
+
+  /** Pull structured, machine-actionable proposals out of the tool-call log.
+   *  Only the three proposal-emitting tools produce these; anything with an
+   *  `error` is skipped, and duplicate proposals are de-duplicated. */
+  private extractProposals(toolCallLog: unknown[]): AiProposal[] {
+    const proposals: AiProposal[] = [];
+    const seen = new Set<string>();
+    for (const entry of toolCallLog) {
+      const result = (entry as { result?: unknown })?.result as Record<string, unknown> | undefined;
+      if (!result || typeof result !== 'object') continue;
+      if (!('proposed_action' in result) || 'error' in result) continue;
+      const actionType = result.action_type as AiProposal['action_type'];
+      if (!['REFUND', 'CREATE_PAYMENT_LINK', 'MARK_REVIEWED'].includes(actionType)) continue;
+      const proposal: AiProposal = {
+        action_type: actionType,
+        exception_id: (result.exception_id as string | null) ?? null,
+        payment_id: result.payment_id as string | undefined,
+        order_id: result.order_id as string | undefined,
+        amount: result.amount as number | undefined,
+        reason: (result.reason as string) ?? '',
+        requires_approval: true,
+      };
+      const key = `${proposal.action_type}:${proposal.exception_id}:${proposal.payment_id ?? ''}:${proposal.order_id ?? ''}:${proposal.amount ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      proposals.push(proposal);
+    }
+    return proposals;
+  }
+
   /** Serialize BigInt fields to strings so they survive JSON.stringify. */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private safe(obj: unknown): unknown {
@@ -496,21 +679,31 @@ export class AiService {
       case 'PAYMENT_MISSING':
         suggestions.push('Verify payment gateway logs', 'Create payment link for customer to retry');
         break;
-      case 'DUPLICATE_PAYMENT':
-        suggestions.push('Issue refund for the duplicate payment');
-        break;
       case 'ORDER_PAYMENT_MISMATCH':
         suggestions.push('Investigate amount discrepancy', 'Issue partial refund or collect balance');
         break;
-      case 'SETTLEMENT_MISSING':
-        suggestions.push('Contact payment gateway for settlement status');
+      case 'BANK_PAYMENT_MISMATCH':
+        suggestions.push('Reconcile bank credit against captured payment', 'Verify UTR with bank');
         break;
-      case 'BANK_MISMATCH':
-        suggestions.push('Verify UTR with bank', 'Escalate to finance team');
+      case 'DUPLICATE_PAYMENT':
+        suggestions.push('Issue refund for the duplicate payment');
+        break;
+      case 'REFUND_MISMATCH':
+        suggestions.push('Compare refund amount against gateway record', 'Escalate to finance team if unresolved');
         break;
       case 'REFUND_DELAY':
         suggestions.push('Contact Razorpay support', 'Escalate if over 48 hours');
         break;
+      case 'SETTLEMENT_MISSING':
+        suggestions.push('Contact payment gateway for settlement status');
+        break;
+      case 'SETTLEMENT_AMOUNT_MISMATCH':
+        suggestions.push('Reconcile settlement amount against captured payments', 'Check for fees/adjustments deducted by gateway');
+        break;
+      case 'BANK_MISMATCH':
+        suggestions.push('Verify UTR with bank', 'Escalate to finance team');
+        break;
+      case 'UNKNOWN_EXCEPTION':
       default:
         suggestions.push('Mark for manual review', 'Escalate to finance team');
     }
