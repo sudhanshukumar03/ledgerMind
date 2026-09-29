@@ -1,13 +1,19 @@
 import { Controller, Post, Get, Req, Query, Headers, RawBodyRequest, UseGuards, HttpCode } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { WebhooksService } from './webhooks.service.js';
 import * as crypto from 'crypto';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { THROTTLE } from '../../common/throttler/throttler.config.js';
 
 @Controller('webhooks')
 export class WebhooksController {
     constructor(private readonly webhooksService: WebhooksService) { }
 
+    // Unauthenticated endpoint: each request costs an HMAC verify + a DB write
+    // (invalid events are still persisted for audit). Cap a forged-webhook
+    // flood per source IP without dropping legitimate bursty delivery.
+    @Throttle({ default: THROTTLE.WEBHOOK })
     @Public()
     @Post('razorpay')
     @HttpCode(200)

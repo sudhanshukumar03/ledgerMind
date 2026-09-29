@@ -16,6 +16,24 @@ async function bootstrap() {
     rawBody: true, // ← Required for webhook HMAC verification
   });
 
+  // Behind a reverse proxy / load balancer, req.ip must come from
+  // X-Forwarded-For for rate limiting to key on the real client. Trust only as
+  // many proxy hops as actually front the app — trusting all hops lets clients
+  // spoof XFF and evade the limiter. TRUST_PROXY accepts a hop count ("1"),
+  // "true"/"false", or an IP/subnet; defaults to 1 in production, off in dev.
+  const trustProxyEnv = process.env.TRUST_PROXY;
+  const trustProxy =
+    trustProxyEnv === undefined
+      ? process.env.NODE_ENV === 'production'
+      : /^\d+$/.test(trustProxyEnv)
+        ? parseInt(trustProxyEnv, 10)
+        : trustProxyEnv === 'true'
+          ? true
+          : trustProxyEnv === 'false'
+            ? false
+            : trustProxyEnv;
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxy);
+
   app.use(helmet());
   // Capture the raw body on the request so webhook HMAC verification can run
   // against the exact bytes. A bare json() parser consumes the stream before

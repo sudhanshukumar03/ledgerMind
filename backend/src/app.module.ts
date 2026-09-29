@@ -21,14 +21,28 @@ import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { TransactionsModule } from './modules/transactions/transactions.module.js';
 
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { RedisThrottlerStorage } from './common/throttler/redis-throttler-storage.js';
+import { THROTTLE, throttlerTracker, ipGlobalKey } from './common/throttler/throttler.config.js';
+
+// Single shared instance: passed to the throttler as its storage backend and
+// also registered as a provider below so its shutdown hook can close Redis.
+const throttlerStorage = new RedisThrottlerStorage();
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100,
-    }]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        // Per-route ceiling (route + IP). Routes tighten this via @Throttle.
+        { name: 'default', ttl: THROTTLE.GLOBAL_TTL, limit: THROTTLE.GLOBAL_LIMIT },
+        // Route-agnostic hard cap per IP across the whole API — stops a single
+        // source flooding by spreading over many endpoints.
+        { name: 'ip-global', ttl: THROTTLE.IP_GLOBAL.ttl, limit: THROTTLE.IP_GLOBAL.limit, generateKey: ipGlobalKey },
+      ],
+      storage: throttlerStorage,
+      getTracker: (req) => throttlerTracker(req),
+      errorMessage: 'Too many requests — please slow down and try again shortly.',
+    }),
     // Register JwtModule at root scope so the global JwtAuthGuard can inject JwtService
     JwtModule.registerAsync({
       global: true,
@@ -60,6 +74,9 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     TransactionsModule,
   ],
   providers: [
+    // Register the shared Redis throttler storage so its OnApplicationShutdown
+    // hook fires (when shutdown hooks are enabled) and Redis is closed cleanly.
+    { provide: RedisThrottlerStorage, useValue: throttlerStorage },
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
