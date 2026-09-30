@@ -555,13 +555,19 @@ export class AiService {
       content: 'Produce your final answer now as a single JSON object and nothing else. You have a strict length budget, so be concise: summary at most 3 sentences, likely_cause at most 2 sentences, evidence_chain at most 4 items of one short sentence each, next_steps at most 3 items of one short sentence each. A truncated response is worse than a brief one — finish the JSON object.'
     });
 
+    // Some Groq models (the gpt-oss reasoning family) reject the strict
+    // `json_object` response_format with a 400. The final-answer prompt above
+    // already demands "a single JSON object and nothing else", so for those
+    // models we skip the response_format to avoid a guaranteed failed call.
+    // Models that honour it keep the stronger server-side JSON guarantee.
+    const useJsonMode = !/gpt-oss/i.test(model);
     let fallback;
     try {
       fallback = await this.client.chat.completions.create({
         model,
         messages,
         max_tokens: 650,
-        response_format: { type: 'json_object' }
+        ...(useJsonMode ? { response_format: { type: 'json_object' as const } } : {}),
       });
     } catch (err: unknown) {
       this.logger.warn(`Groq API failed during fallback: ${(err as Error).message}. Retrying without JSON mode...`);
