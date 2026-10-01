@@ -11,6 +11,7 @@ import {
   Cpu,
   RefreshCw,
   ListOrdered,
+  ScrollText,
   LogOut
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
@@ -23,6 +24,7 @@ const NAV = [
   { href: '/ai-controller', label: 'AI Controller', icon: Cpu },
   { href: '/reconciliation', label: 'Reconciliation', icon: RefreshCw },
   { href: '/transactions', label: 'Transactions', icon: ListOrdered },
+  { href: '/audit', label: 'Audit Trail', icon: ScrollText },
 ];
 
 export function Sidebar() {

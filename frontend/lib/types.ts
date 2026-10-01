@@ -143,3 +143,19 @@ export interface PaginatedResponse<T> {
   page: number;
   limit: number;
 }
+
+export interface AuditLog {
+  id: string;
+  merchantId: string;
+  userId: string | null;
+  actorType: 'USER' | 'SYSTEM' | 'AI';
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  beforeState: unknown | null;
+  afterState: unknown | null;
+  reason: string | null;
+  correlationId: string | null;
+  createdAt: string;
+  user?: { id: string; name: string; email: string } | null;
+}

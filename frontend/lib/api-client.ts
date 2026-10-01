@@ -7,10 +7,10 @@
  */
 
 import axios from 'axios';
-import type { 
-  User, DashboardStats, Exception, AiAnalysis, ReconciliationRun, Action, 
-  ProposeActionPayload, ChatMessage, ChatResponse, Payment, Settlement, 
-  WebhookEvent, PaginatedResponse 
+import type {
+  User, DashboardStats, Exception, AiAnalysis, ReconciliationRun, Action,
+  ProposeActionPayload, ChatMessage, ChatResponse, Payment, Settlement,
+  WebhookEvent, PaginatedResponse, AuditLog
 } from './types';
 
 export * from './types';
@@ -112,6 +112,12 @@ export const transactionsApi = {
 export const webhooksApi = {
   listEvents: (params?: { page?: number; limit?: number }) =>
     api.get<PaginatedResponse<WebhookEvent>>('/webhooks/events', { params }),
+};
+
+// ─── Audit Trail ─────────────────────────────────────────────────────────────
+export const auditApi = {
+  list: (params?: { limit?: number }) =>
+    api.get<AuditLog[]>('/audit', { params }),
 };
 
 
