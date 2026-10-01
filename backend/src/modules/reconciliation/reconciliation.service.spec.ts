@@ -23,9 +23,10 @@ describe('ReconciliationService', () => {
             bankTransaction: { findMany: jest.fn(() => Promise.resolve([])) },
             reconciliationRun: { create: jest.fn(() => Promise.resolve({ id: 'run-1' })), update: jest.fn() },
             reconciliationMatch: { upsert: jest.fn() },
+            exceptionEvent: { upsert: jest.fn(() => Promise.resolve({})) },
             exception: {
               findUnique: jest.fn(() => Promise.resolve(null)),
-              create: jest.fn(),
+              create: jest.fn(() => Promise.resolve({ id: 'new-exc-id' })),
               update: jest.fn(),
               count: jest.fn(),
               groupBy: jest.fn(),
