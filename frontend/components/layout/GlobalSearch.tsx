@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { C } from '../../lib/tokens';
-import { Search, Home, Activity, ListOrdered, FileText, Zap, Bot, Settings, X } from 'lucide-react';
+import { Search, Home, Activity, ListOrdered, Zap, Bot, Settings, X } from 'lucide-react';
 
 interface GlobalSearchProps {
   isOpen: boolean;
@@ -22,7 +22,6 @@ const STATIC_ROUTES: SearchResult[] = [
   { title: 'Exceptions', href: '/exceptions', icon: <Activity className="w-4 h-4" />, category: 'Pages' },
   { title: 'Reconciliation', href: '/reconciliation', icon: <Activity className="w-4 h-4" />, category: 'Pages' },
   { title: 'Transactions', href: '/transactions', icon: <ListOrdered className="w-4 h-4" />, category: 'Pages' },
-  { title: 'Webhooks', href: '/webhooks', icon: <FileText className="w-4 h-4" />, category: 'Pages' },
   { title: 'Actions', href: '/actions', icon: <Zap className="w-4 h-4" />, category: 'Pages' },
   { title: 'AI Controller', href: '/ai-controller', icon: <Bot className="w-4 h-4" />, category: 'Pages' },
 ];

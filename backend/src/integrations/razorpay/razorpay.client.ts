@@ -53,6 +53,22 @@ export class RazorpayClient {
     }
 
     async createPaymentLink(orderId: string, amountInPaise: number) {
+        // Demo fallback: let the propose→approve→execute flow run offline for
+        // seeded demo orders without live Razorpay credentials (mirrors
+        // createRefund). Real orders still hit the live API.
+        if (orderId.includes('DEMO')) {
+            this.logger.log(`[MOCK] Razorpay payment link created for demo order: ${orderId}`);
+            return {
+                id: `plink_DEMO_${Date.now()}`,
+                entity: 'payment_link',
+                amount: amountInPaise,
+                currency: 'INR',
+                reference_id: orderId,
+                status: 'created',
+                short_url: `https://rzp.io/i/DEMO_${orderId}`,
+            };
+        }
+
         try {
             const link = await this.getClient().paymentLink.create({
                 amount: amountInPaise,

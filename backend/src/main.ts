@@ -63,7 +63,7 @@ async function bootstrap() {
     throw new Error('FRONTEND_URL must be set in production');
   }
 
-  app.enableCors({ origin: frontendUrl || 'http://localhost:3001' });
+  app.enableCors({ origin: frontendUrl || 'http://localhost:3000' });
 
   await app.listen(process.env.PORT || 3000);
 }
