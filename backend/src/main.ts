@@ -50,13 +50,18 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
 
-  const config = new DocumentBuilder()
-    .setTitle('LedgerMind API')
-    .setVersion('1.0')
-    .build();
-  let document = SwaggerModule.createDocument(app, config);
-  document = cleanupOpenApiDoc(document);
-  SwaggerModule.setup('api', app, document);
+  // Swagger exposes the full API surface. Serve it only outside production so
+  // the /api docs can't be scraped as an unauthenticated reconnaissance aid on
+  // a live deployment. Set SWAGGER_ENABLED=true to opt back in explicitly.
+  if (process.env.NODE_ENV !== 'production' || process.env.SWAGGER_ENABLED === 'true') {
+    const config = new DocumentBuilder()
+      .setTitle('LedgerMind API')
+      .setVersion('1.0')
+      .build();
+    let document = SwaggerModule.createDocument(app, config);
+    document = cleanupOpenApiDoc(document);
+    SwaggerModule.setup('api', app, document);
+  }
 
   const frontendUrl = process.env.FRONTEND_URL;
   if (process.env.NODE_ENV === 'production' && !frontendUrl) {
