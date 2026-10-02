@@ -30,7 +30,7 @@ const buildRecap = (stats: DashboardStats | undefined) => {
   }
 
   if (Number(total_transaction_volume) > 0) {
-    clauses.push(`₹${formatPaise(total_transaction_volume)} reconciled`);
+    clauses.push(`${formatPaise(total_transaction_volume)} reconciled`);
   }
 
   if (pending_approvals > 0) {
@@ -64,7 +64,7 @@ export default function DashboardPage() {
     return {
       stats: s.data as DashboardStats,
       exceptions: (e.data.data ?? e.data) as Exception[],
-      runs: ((r.data as any).slice?.(0, 5) ?? []) as ReconciliationRun[]
+      runs: r.slice(0, 5)
     };
   });
 
@@ -87,7 +87,7 @@ export default function DashboardPage() {
   // Fetch reconciliation runs for accurate match rate
   const { data: runsData } = useSWR('/reconciliation/runs?limit=1', () => reconciliationApi.listRuns());
 
-  const latestRun = runsData?.data?.[0] || runs[0];
+  const latestRun = runsData?.[0] || runs[0];
   const matched = latestRun?.matchedCount ?? 0;
   const unmatched = latestRun?.exceptionCount ?? 0;
   const total = matched + unmatched;
@@ -134,7 +134,7 @@ export default function DashboardPage() {
               ) : (
                 <Play className="w-4 h-4" />
               )}
-              {running ? 'Running...' : 'Trigger Demo Mismatch'}
+              {running ? 'Running...' : 'Run Now'}
             </button>
           </div>
         }

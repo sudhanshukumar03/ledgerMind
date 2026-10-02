@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { aiApi, actionsApi, AiProposal, ChatMessage, ChatResponse } from '../../../lib/api-client';
 import { C } from '../../../lib/tokens';
+import { humanizeKey, formatValue } from '../../../lib/humanize';
 import { Bot, User, Send, Loader2, Zap, ShieldAlert, FileText, XCircle, ArrowRight, Activity, Info, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface Message {
@@ -115,7 +116,7 @@ function AssistantBubble({ msg }: { msg: Message }) {
         <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: C.primary, color: C.bg }}>
           <Loader2 className="w-4 h-4 animate-spin" />
         </div>
-        <div className="flex flex-col gap-1 w-full max-w-2xl">
+        <div className="flex flex-col gap-1 w-full min-w-0 max-w-2xl">
           <div className="text-[11px] font-semibold" style={{ color: C.textSecondary }}>LedgerMind AI</div>
           <div className="px-5 py-4 rounded-2xl rounded-tl-sm border" style={{ backgroundColor: C.surface, borderColor: C.border }}>
             <div className="flex items-center gap-1.5">
@@ -134,7 +135,7 @@ function AssistantBubble({ msg }: { msg: Message }) {
       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: C.primary, color: C.bg }}>
         <Bot className="w-5 h-5" />
       </div>
-      <div className="flex flex-col gap-1 w-full max-w-2xl">
+      <div className="flex flex-col gap-1 w-full min-w-0">
         <div className="text-[11px] font-semibold" style={{ color: C.textSecondary }}>LedgerMind AI</div>
         <div className="px-5 py-4 rounded-2xl rounded-tl-sm border" style={{ backgroundColor: C.surface, borderColor: C.border }}>
           <AiMarkdown content={msg.content} />
@@ -182,6 +183,35 @@ function AssistantBubble({ msg }: { msg: Message }) {
 
 const genId = () => Math.random().toString(36).slice(2);
 
+/**
+ * The chat endpoint normally returns prose in `message`, but some paths — notably
+ * the AI-provider-unavailable fallback — return a serialized analysis object
+ * (`{ summary, likely_cause, ... }`) instead. The user must never see raw JSON,
+ * so parse those into readable markdown and only fall back to the raw string when
+ * it genuinely isn't a JSON object.
+ */
+function normalizeMessage(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.trim() === '') return 'No response';
+  const text = raw.trim();
+  if (!(text.startsWith('{') && text.endsWith('}'))) return raw;
+
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return raw; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return raw;
+
+  const obj = parsed as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const lines: string[] = [];
+  if (str(obj.summary)) lines.push(str(obj.summary));
+  if (str(obj.likely_cause)) lines.push(`**Likely cause:** ${str(obj.likely_cause)}`);
+  if (str(obj.recommended_action)) lines.push(`**Recommended action:** ${str(obj.recommended_action)}`);
+  if (lines.length > 0) return lines.join('\n\n');
+
+  // Unknown object shape — render readable key/value lines rather than JSON braces.
+  const kv = Object.entries(obj).map(([k, v]) => `**${humanizeKey(k)}:** ${formatValue(k, v)}`);
+  return kv.length ? kv.join('\n\n') : raw;
+}
+
 export default function AiControllerPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -224,7 +254,7 @@ export default function AiControllerPage() {
       const data: ChatResponse = res.data;
       setMessages(prev => prev.map(m =>
         m.id === thinkingMsg.id
-          ? { ...m, content: data.message ?? 'No response', loading: false, toolCallsMade: data.tool_calls_made, toolCalls: data.tool_calls, suggestedActions: data.suggested_actions, proposals: data.proposals }
+          ? { ...m, content: normalizeMessage(data.message), loading: false, toolCallsMade: data.tool_calls_made, toolCalls: data.tool_calls, suggestedActions: data.suggested_actions, proposals: data.proposals }
           : m
       ));
     } catch {

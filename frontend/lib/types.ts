@@ -127,6 +127,50 @@ export interface Settlement {
   utr?: string;
 }
 
+export interface Order {
+  id: string;
+  orderId: string;
+  amount: string;      // paise
+  currency: string;
+  status: string;
+  customerId?: string | null;
+  createdAt: string;
+}
+
+export interface Refund {
+  id: string;
+  refundId: string;
+  amount: string;      // paise
+  status: string;
+  createdAt: string;
+  processedAt?: string | null;
+}
+
+export interface BankTransaction {
+  id: string;
+  bankTxnId: string;
+  utr?: string | null;
+  amount: string;      // paise
+  transactionType: string;
+  transactionDate: string;
+  description?: string | null; // UNTRUSTED — render via PlainText
+  status: string;
+}
+
+/** GET /payments/:id — payment plus its linked order and refunds. */
+export interface PaymentDetail extends Payment {
+  currency?: string;
+  capturedAt?: string | null;
+  orderId?: string | null;
+  order?: Order | null;
+  refunds: Refund[];
+}
+
+/** GET /settlements/:id — settlement plus the bank transactions it covers. */
+export interface SettlementDetail extends Settlement {
+  bankTransactions: BankTransaction[];
+}
+
 export interface WebhookEvent {
   id: string;
   eventId: string;

@@ -12,11 +12,17 @@ export class PaymentsController {
         @Request() req: any,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
+        @Query('status') status?: string,
+        @Query('method') method?: string,
+        @Query('search') search?: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
     ) {
         return this.paymentsService.findAll(
             req.user.merchantId,
             page ? parseInt(page, 10) : 1,
             limit ? parseInt(limit, 10) : 20,
+            { status, method, search, from, to },
         );
     }
 

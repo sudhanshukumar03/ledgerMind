@@ -12,11 +12,16 @@ export class SettlementsController {
         @Request() req: any,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
+        @Query('status') status?: string,
+        @Query('search') search?: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
     ) {
         return this.settlementsService.findAll(
             req.user.merchantId,
             page ? parseInt(page, 10) : 1,
             limit ? parseInt(limit, 10) : 20,
+            { status, search, from, to },
         );
     }
 

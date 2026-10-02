@@ -10,6 +10,18 @@ import { Play, Loader2, AlertCircle, CheckCircle2, RefreshCcw } from 'lucide-rea
 import useSWR from 'swr';
 import { useSetInProgressRun } from '../../../components/providers/SWRProvider';
 
+/**
+ * Match rate = matched / (matched + exceptions), matching the Dashboard's
+ * headline figure. (Using totalRecords as the denominator double-counts
+ * records that are neither matched nor flagged, which made the same run read
+ * as a lower rate here than on the Dashboard.)
+ */
+const matchRateOf = (r: ReconciliationRun) => {
+  const matched = r.matchedCount ?? 0;
+  const denom = matched + (r.exceptionCount ?? 0);
+  return denom > 0 ? (matched / denom) * 100 : 0;
+};
+
 export default function ReconciliationPage() {
   const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [running, setRunning] = useState(false);
@@ -17,8 +29,7 @@ export default function ReconciliationPage() {
 
   const { data: runs = [], isLoading: loading, mutate } = useSWR(
     'reconciliation-runs',
-    () => reconciliationApi.listRuns()
-            .then(r => Array.isArray(r.data) ? r.data : (r.data as any).data ?? []),
+    () => reconciliationApi.listRuns(),
     { fallbackData: [] }
   );
 
@@ -41,6 +52,17 @@ export default function ReconciliationPage() {
   };
 
   const latest = runs[0];
+
+  // Headline match rate (consistent with the Dashboard) plus run-over-run
+  // trend and sparkline series for the stat cards. Runs arrive newest-first,
+  // so reverse for a chronological (oldest → newest) sparkline.
+  const latestDenom = latest ? (latest.matchedCount ?? 0) + (latest.exceptionCount ?? 0) : 0;
+  const latestRate = latest ? matchRateOf(latest) : 0;
+  const prevRate = runs[1] ? matchRateOf(runs[1]) : null;
+  const rateDelta = prevRate != null ? latestRate - prevRate : null;
+  const chronological = [...runs].reverse();
+  const matchRateSeries = chronological.map(matchRateOf);
+  const matchedSeries = chronological.map(r => r.matchedCount ?? 0);
   
   useEffect(() => {
     // If the latest run just finished successfully, show a message
@@ -75,7 +97,7 @@ export default function ReconciliationPage() {
         }
       />
 
-      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8 max-w-[1200px] w-full mx-auto">
+      <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8">
         
         {msg && (
           <div 
@@ -93,14 +115,26 @@ export default function ReconciliationPage() {
         )}
 
         {latest && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard 
-              label="Match Rate" 
-              value={latest.totalRecords > 0 ? `${Math.round((latest.matchedCount / latest.totalRecords) * 100)}%` : '—'} 
-              isPositive={latest.totalRecords > 0 && (latest.matchedCount / latest.totalRecords) > 0.9}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard
+              label="Match Rate"
+              value={latestDenom > 0 ? `${latestRate.toFixed(1)}%` : '—'}
+              trend={rateDelta != null ? `${rateDelta >= 0 ? '+' : ''}${rateDelta.toFixed(1)}%` : undefined}
+              trendTooltip={prevRate != null ? `vs. previous run (${prevRate.toFixed(1)}%)` : undefined}
+              isPositive={rateDelta != null ? rateDelta >= 0 : latestRate >= 90}
+              sparklineData={matchRateSeries.length > 1 ? matchRateSeries : undefined}
             />
-            <StatCard label="Matched Records" value={latest.matchedCount ?? 0} />
-            <StatCard label="Exceptions Found" value={latest.exceptionCount ?? 0} isPositive={false} />
+            <StatCard
+              label="Matched Records"
+              value={latest.matchedCount ?? 0}
+              sparklineData={matchedSeries.length > 1 ? matchedSeries : undefined}
+            />
+            <StatCard
+              label="Exceptions Found"
+              value={latest.exceptionCount ?? 0}
+              trend={(latest.exceptionCount ?? 0) > 0 ? `${latest.exceptionCount} open` : undefined}
+              isPositive={false}
+            />
             <StatCard label="Total Records" value={latest.totalRecords ?? 0} />
           </div>
         )}
@@ -130,7 +164,7 @@ export default function ReconciliationPage() {
                   const ended = run.completedAt ? new Date(run.completedAt) : null;
                   const dur = ended ? Math.round((ended.getTime() - started.getTime()) / 1000) : null;
                   
-                  const pct = run.totalRecords > 0 ? (run.matchedCount / run.totalRecords) * 100 : 0;
+                  const pct = matchRateOf(run);
                   
                   return (
                     <tr key={run.id} className="table-row-hover">

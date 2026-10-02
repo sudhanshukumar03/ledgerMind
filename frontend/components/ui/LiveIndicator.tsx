@@ -16,7 +16,7 @@ export function LiveIndicator() {
 
   if (!lastUpdated) {
     return (
-      <div className="flex items-center gap-2 text-[12px] font-medium" style={{ color: C.warning }}>
+      <div className="flex items-center gap-2 text-[12px] font-medium shrink-0 whitespace-nowrap" style={{ color: C.warning }}>
         <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: C.warning }} />
         Reconnecting…
       </div>
@@ -34,7 +34,7 @@ export function LiveIndicator() {
   const color = isStale ? C.warning : C.textMuted;
 
   return (
-    <div className="flex items-center gap-2 text-[12px] font-medium" style={{ color }}>
+    <div className="flex items-center gap-2 text-[12px] font-medium shrink-0 whitespace-nowrap" style={{ color }}>
       <div
         className={`w-1.5 h-1.5 rounded-full${isStale ? ' animate-pulse' : ''}`}
         style={{ backgroundColor: isStale ? C.warning : C.success }}

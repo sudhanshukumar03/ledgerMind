@@ -1,20 +1,41 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 
 @Injectable()
 export class PaymentsService {
     constructor(private readonly prisma: PrismaService) { }
 
-    async findAll(merchantId: string, page = 1, limit = 20) {
+    async findAll(
+        merchantId: string,
+        page = 1,
+        limit = 20,
+        filters: { status?: string; method?: string; search?: string; from?: string; to?: string } = {},
+    ) {
         const skip = (page - 1) * limit;
+
+        // Build a merchant-isolated WHERE clause with optional filters.
+        const where: Prisma.PaymentWhereInput = { merchantId };
+        if (filters.status && filters.status in PaymentStatus) {
+            where.status = filters.status as PaymentStatus;
+        }
+        if (filters.method) where.method = filters.method;
+        if (filters.search) where.paymentId = { contains: filters.search, mode: 'insensitive' };
+        if (filters.from || filters.to) {
+            const createdAt: Prisma.DateTimeFilter = {};
+            if (filters.from) createdAt.gte = new Date(filters.from);
+            if (filters.to) createdAt.lte = new Date(filters.to);
+            where.createdAt = createdAt;
+        }
+
         const [payments, total] = await Promise.all([
             this.prisma.payment.findMany({
-                where: { merchantId },
+                where,
                 orderBy: { createdAt: 'desc' },
                 skip,
                 take: limit,
             }),
-            this.prisma.payment.count({ where: { merchantId } }),
+            this.prisma.payment.count({ where }),
         ]);
 
         return {
