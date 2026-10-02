@@ -144,6 +144,73 @@ Returns a transaction and its related financial records.
 }
 ```
 
+### GET /payments
+
+Paginated payments for the authenticated merchant. Backs the **Payments** tab of the Transactions page.
+
+**Query Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| search    | Case-insensitive match on `paymentId` |
+| status    | `PaymentStatus` — CREATED, AUTHORIZED, CAPTURED, FAILED, PARTIALLY_REFUNDED, REFUNDED (unknown values ignored) |
+| method    | UPI, CARD, NETBANKING, WALLET |
+| from / to | Date range on `createdAt` |
+| page      | Page number (default 1) |
+| limit     | Page size (default 20, max 100) |
+
+Response uses the uniform list shape `{ data, total, page, limit }`; `amount` is an integer-paise string.
+
+### GET /payments/:id
+
+A single payment with its linked order and refunds.
+
+```json
+{
+  "id": "uuid",
+  "paymentId": "pay_123",
+  "amount": "500000",
+  "currency": "INR",
+  "status": "CAPTURED",
+  "method": "UPI",
+  "order": { "orderId": "order_123", "amount": "500000", "status": "PAID", "customerId": "cust_1" },
+  "refunds": [ { "refundId": "rfnd_1", "amount": "250000", "status": "PROCESSED", "createdAt": "..." } ]
+}
+```
+
+### GET /settlements
+
+Paginated settlements for the authenticated merchant. Backs the **Settlements** tab.
+
+**Query Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| search    | Case-insensitive match on `settlementId` or `utr` |
+| status    | `SettlementStatus` — CREATED, PROCESSED, FAILED (unknown values ignored) |
+| from / to | Date range on `settlementDate` |
+| page      | Page number (default 1) |
+| limit     | Page size (default 20, max 100) |
+
+### GET /settlements/:id
+
+A single settlement with the bank transactions it covers.
+
+```json
+{
+  "id": "uuid",
+  "settlementId": "setl_123",
+  "amount": "1842300",
+  "status": "PROCESSED",
+  "utr": "UTR-DEMO-001",
+  "bankTransactions": [
+    { "bankTxnId": "btxn_1", "utr": "UTR-DEMO-001", "amount": "1842300", "transactionType": "CREDIT", "transactionDate": "...", "description": "...", "status": "..." }
+  ]
+}
+```
+
+> Bank-transaction `description` is untrusted text — rendered via `<PlainText>` in the UI, never interpolated into prompts or HTML.
+
 ## 5. Reconciliation
 
 ### GET /reconciliation/runs

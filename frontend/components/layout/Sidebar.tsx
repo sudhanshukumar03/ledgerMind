@@ -11,6 +11,7 @@ import {
   Cpu,
   RefreshCw,
   ListOrdered,
+  ScrollText,
   LogOut
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
@@ -18,11 +19,12 @@ import { ThemeToggle } from '../ui/ThemeToggle';
 
 const NAV = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/exceptions', label: 'Exceptions', icon: AlertTriangle, badge: true },
-  { href: '/actions', label: 'Actions', icon: Activity },
-  { href: '/ai-controller', label: 'AI Controller', icon: Cpu },
-  { href: '/reconciliation', label: 'Reconciliation', icon: RefreshCw },
   { href: '/transactions', label: 'Transactions', icon: ListOrdered },
+  { href: '/reconciliation', label: 'Reconciliation', icon: RefreshCw },
+  { href: '/exceptions', label: 'Exceptions', icon: AlertTriangle, badge: true },
+  { href: '/ai-controller', label: 'AI Controller', icon: Cpu },
+  { href: '/actions', label: 'Actions', icon: Activity },
+  { href: '/audit', label: 'Audit Trail', icon: ScrollText },
 ];
 
 export function Sidebar() {

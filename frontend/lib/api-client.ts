@@ -7,10 +7,11 @@
  */
 
 import axios from 'axios';
-import type { 
-  User, DashboardStats, Exception, AiAnalysis, ReconciliationRun, Action, 
-  ProposeActionPayload, ChatMessage, ChatResponse, Payment, Settlement, 
-  WebhookEvent, PaginatedResponse 
+import type {
+  User, DashboardStats, Exception, AiAnalysis, ReconciliationRun, Action,
+  ProposeActionPayload, ChatMessage, ChatResponse, Payment, Settlement,
+  PaymentDetail, SettlementDetail,
+  WebhookEvent, PaginatedResponse, AuditLog
 } from './types';
 
 export * from './types';
@@ -69,7 +70,13 @@ export const exceptionsApi = {
 // ─── Reconciliation ───────────────────────────────────────────────────────────
 export const reconciliationApi = {
   triggerRun: () => api.post<ReconciliationRun>('/reconciliation/run'),
-  listRuns: () => api.get<ReconciliationRun[]>('/reconciliation/runs'),
+  // Normalise the response shape in one place: the endpoint returns a bare
+  // array today, but tolerate a paginated `{ data: [] }` wrapper too so every
+  // caller gets a plain ReconciliationRun[] regardless.
+  listRuns: async (): Promise<ReconciliationRun[]> => {
+    const r = await api.get<ReconciliationRun[] | { data: ReconciliationRun[] }>('/reconciliation/runs');
+    return Array.isArray(r.data) ? r.data : (r.data?.data ?? []);
+  },
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -97,21 +104,32 @@ export const actionsApi = {
 export const aiApi = {
   chat: (messages: ChatMessage[]) =>
     api.post<ChatResponse>('/ai/chat', { messages }),
-  getConfig: () => api.get<{ model: string }>('/ai/config'),
+  getConfig: () => api.get<{ model: string; toolCount: number }>('/ai/config'),
 };
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
+type PaymentFilters = { page?: number; limit?: number; status?: string; method?: string; search?: string; from?: string; to?: string };
+type SettlementFilters = { page?: number; limit?: number; status?: string; search?: string; from?: string; to?: string };
+
 export const transactionsApi = {
-  listPayments: (params?: { page?: number; limit?: number }) =>
+  listPayments: (params?: PaymentFilters) =>
     api.get<PaginatedResponse<Payment>>('/payments', { params }),
-  listSettlements: (params?: { page?: number; limit?: number }) =>
+  listSettlements: (params?: SettlementFilters) =>
     api.get<PaginatedResponse<Settlement>>('/settlements', { params }),
+  getPayment: (id: string) => api.get<PaymentDetail>(`/payments/${id}`),
+  getSettlement: (id: string) => api.get<SettlementDetail>(`/settlements/${id}`),
 };
 
 // ─── Webhooks ────────────────────────────────────────────────────────────────
 export const webhooksApi = {
   listEvents: (params?: { page?: number; limit?: number }) =>
     api.get<PaginatedResponse<WebhookEvent>>('/webhooks/events', { params }),
+};
+
+// ─── Audit Trail ─────────────────────────────────────────────────────────────
+export const auditApi = {
+  list: (params?: { limit?: number }) =>
+    api.get<AuditLog[]>('/audit', { params }),
 };
 
 

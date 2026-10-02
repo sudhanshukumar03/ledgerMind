@@ -47,7 +47,7 @@ export function AiMarkdown({ content }: { content: string }) {
       remarkPlugins={[remarkGfm]}
       components={{
         table: ({ children }) => (
-          <div className="overflow-x-auto my-4">
+          <div className="ai-table-scroll my-4">
             <table className="min-w-full border-collapse border border-slate-200">
               {children}
             </table>

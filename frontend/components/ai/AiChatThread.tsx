@@ -8,7 +8,7 @@ import { Bot, Loader2, Zap } from 'lucide-react';
 import { AiMarkdown } from './AiMarkdown';
 import { ToolCallList } from './ToolCallList';
 
-export function AiChatThread({ exceptionId, initialAnalysis }: { exceptionId: string; initialAnalysis?: AiAnalysis }) {
+export function AiChatThread({ exceptionId, label, initialAnalysis }: { exceptionId: string; label?: string; initialAnalysis?: AiAnalysis }) {
   const { data: analysis, loading, error, investigate } = useAiInvestigation(exceptionId, initialAnalysis);
 
   return (
@@ -22,7 +22,7 @@ export function AiChatThread({ exceptionId, initialAnalysis }: { exceptionId: st
           <div className="text-[11px] font-semibold" style={{ color: C.textSecondary }}>LedgerMind AI</div>
           <div className="px-5 py-4 rounded-2xl rounded-tl-sm border text-[13px] leading-relaxed" style={{ backgroundColor: C.surface, borderColor: C.border, color: C.textPrimary }}>
             <p className="mb-4">
-              I am ready to help you investigate exception <strong className="font-mono">{exceptionId}</strong>.
+              I am ready to help you investigate exception <strong className="font-mono">{label ?? exceptionId}</strong>.
             </p>
             <button 
               onClick={investigate} 

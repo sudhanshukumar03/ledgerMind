@@ -1,6 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
-import { Severity, ReconciliationRunStatus, MatchEntityType, MatchMethod, ExceptionType, ImpactLevel, ExceptionStatus, Order, Payment, Refund, Settlement, BankTransaction } from '@prisma/client';
+import { Prisma, Severity, ReconciliationRunStatus, MatchEntityType, MatchMethod, ExceptionType, ImpactLevel, ExceptionStatus, Order, Payment, Refund, Settlement, BankTransaction } from '@prisma/client';
+
+/**
+ * One evidence item on an exception's timeline. The reconciliation engine emits
+ * these from the same entities it inspects while matching, so the timeline in
+ * the UI reconstructs *why* the exception exists (doc 07). `occurredAt` is the
+ * real financial timestamp of the underlying entity — NOT the run time — so
+ * evidence sorts in the order events actually happened.
+ */
+export interface ExceptionEventDraft {
+  eventType: string;
+  entityType: string;
+  entityId: string;
+  snapshot: Prisma.InputJsonValue;
+  occurredAt: Date;
+}
 
 export interface ExceptionDraft {
   type: ExceptionType;
@@ -14,6 +29,37 @@ export interface ExceptionDraft {
   dedupKey: string;
   primaryEntityType: string;
   primaryEntityId: string;
+  events: ExceptionEventDraft[];
+}
+
+/**
+ * Serialise a Prisma entity into a plain JSON snapshot safe for a Json column:
+ * BigInt → string (paise), Date → ISO string (via Date.prototype.toJSON). Kept
+ * local so the engine does not depend on the global BigInt.toJSON patch in
+ * main.ts (which is absent under unit tests).
+ */
+function toSnapshot(entity: unknown): Prisma.InputJsonValue {
+  return JSON.parse(
+    JSON.stringify(entity, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value,
+    ),
+  );
+}
+
+/** Build an evidence event from an entity, falling back to now if it carries no timestamp. */
+function evidence(
+  eventType: string,
+  entityType: string,
+  entity: { id: string },
+  occurredAt: Date | null | undefined,
+): ExceptionEventDraft {
+  return {
+    eventType,
+    entityType,
+    entityId: entity.id,
+    snapshot: toSnapshot(entity),
+    occurredAt: occurredAt ?? new Date(),
+  };
 }
 
 export interface MatchDraft {
@@ -162,6 +208,7 @@ export class ReconciliationService {
               severityScore: Math.round(score),
             },
           });
+          await this.writeExceptionEvents(tx, existing.id, exc, now);
           updated++;
         } else {
           // Generate unique Exception ID: EXC-YYYYMMDD-HHMMSS-XXX
@@ -169,15 +216,16 @@ export class ReconciliationService {
           const excId = `EXC-${timestamp}-${counter.toString().padStart(3, '0')}`;
           counter++;
 
-          await tx.exception.create({
+          const createdExc = await tx.exception.create({
             data: {
-              ...exc,
+              ...this.toExceptionData(exc),
               exceptionId: excId,
               severity: calculatedSeverity,
               severityScore: Math.round(score),
               runId: run.id,
             },
           });
+          await this.writeExceptionEvents(tx, createdExc.id, exc, now);
           created++;
         }
       }
@@ -203,6 +251,65 @@ export class ReconciliationService {
   }
 
   // --- Rule Hierarchy Implementations ---
+
+  /** Strip the transient `events` array so only Exception scalar columns reach Prisma. */
+  private toExceptionData(exc: ExceptionDraft) {
+    const { events: _events, ...data } = exc;
+    return data;
+  }
+
+  /**
+   * Persist an exception's evidence timeline plus a terminal EXCEPTION_DETECTED
+   * marker. Idempotent across re-runs via the (exceptionId, eventType, entityId)
+   * unique constraint, so a repeated reconciliation refreshes snapshots rather
+   * than duplicating rows.
+   */
+  private async writeExceptionEvents(
+    tx: Prisma.TransactionClient,
+    exceptionId: string,
+    exc: ExceptionDraft,
+    detectedAt: Date,
+  ) {
+    const events: ExceptionEventDraft[] = [
+      ...exc.events,
+      {
+        eventType: 'EXCEPTION_DETECTED',
+        entityType: exc.primaryEntityType,
+        entityId: exc.primaryEntityId,
+        snapshot: {
+          type: exc.type,
+          financialImpact: exc.financialImpact.toString(),
+          differenceAmount: exc.differenceAmount.toString(),
+        },
+        occurredAt: detectedAt,
+      },
+    ];
+
+    for (const ev of events) {
+      await tx.exceptionEvent.upsert({
+        where: {
+          exception_event_unique: {
+            exceptionId,
+            eventType: ev.eventType,
+            entityId: ev.entityId,
+          },
+        },
+        create: {
+          exceptionId,
+          eventType: ev.eventType,
+          entityType: ev.entityType,
+          entityId: ev.entityId,
+          snapshot: ev.snapshot,
+          occurredAt: ev.occurredAt,
+        },
+        update: {
+          entityType: ev.entityType,
+          snapshot: ev.snapshot,
+          occurredAt: ev.occurredAt,
+        },
+      });
+    }
+  }
   
   private checkOrderPayment(orders: Order[], payments: Payment[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
     for (const order of orders) {
@@ -223,6 +330,7 @@ export class ReconciliationService {
           dedupKey: `${merchantId}:PAYMENT_MISSING:${order.id}`,
           primaryEntityType: 'ORDER',
           primaryEntityId: order.id,
+          events: [evidence('ORDER_PLACED', 'ORDER', order, order.createdAt)],
         });
       } else if (relatedPayments.length > 1) {
         const actual = relatedPayments.reduce((sum, p) => sum + p.amount, BigInt(0));
@@ -238,6 +346,12 @@ export class ReconciliationService {
           dedupKey: `${merchantId}:DUPLICATE_PAYMENT:${order.id}`,
           primaryEntityType: 'ORDER',
           primaryEntityId: order.id,
+          events: [
+            evidence('ORDER_PLACED', 'ORDER', order, order.createdAt),
+            ...relatedPayments.map((p) =>
+              evidence('PAYMENT_CAPTURED', 'PAYMENT', p, p.createdAt),
+            ),
+          ],
         });
       } else {
         const p = relatedPayments[0];
@@ -265,6 +379,10 @@ export class ReconciliationService {
             dedupKey: `${merchantId}:ORDER_PAYMENT_MISMATCH:${order.id}`,
             primaryEntityType: 'ORDER',
             primaryEntityId: order.id,
+            events: [
+              evidence('ORDER_PLACED', 'ORDER', order, order.createdAt),
+              evidence('PAYMENT_CAPTURED', 'PAYMENT', p, p.createdAt),
+            ],
           });
         }
       }
@@ -296,6 +414,7 @@ export class ReconciliationService {
           dedupKey: `${merchantId}:SETTLEMENT_MISSING:${payment.id}`,
           primaryEntityType: 'PAYMENT',
           primaryEntityId: payment.id,
+          events: [evidence('PAYMENT_CAPTURED', 'PAYMENT', payment, payment.createdAt)],
         });
       } else {
         availableSettlements.delete(matched.id);
@@ -342,6 +461,7 @@ export class ReconciliationService {
           dedupKey: `${merchantId}:BANK_MISMATCH:SETTLEMENT:${s.id}`,
           primaryEntityType: 'SETTLEMENT',
           primaryEntityId: s.id,
+          events: [evidence('SETTLEMENT_CREATED', 'SETTLEMENT', s, s.createdAt)],
         });
       } else {
         availableBankTxns.delete(match.id);
@@ -368,6 +488,10 @@ export class ReconciliationService {
             dedupKey: `${merchantId}:SETTLEMENT_AMOUNT_MISMATCH:${s.id}`,
             primaryEntityType: 'SETTLEMENT',
             primaryEntityId: s.id,
+            events: [
+              evidence('SETTLEMENT_CREATED', 'SETTLEMENT', s, s.createdAt),
+              evidence('BANK_CREDIT', 'BANK_TRANSACTION', match, match.transactionDate),
+            ],
           });
         }
       }
@@ -392,6 +516,7 @@ export class ReconciliationService {
             dedupKey: `${merchantId}:REFUND_DELAY:${r.id}`,
             primaryEntityType: 'REFUND',
             primaryEntityId: r.id,
+            events: [evidence('REFUND_INITIATED', 'REFUND', r, r.createdAt)],
           });
         }
       }
@@ -433,6 +558,10 @@ export class ReconciliationService {
           dedupKey: `${merchantId}:BANK_PAYMENT_MISMATCH:${payment.id}`,
           primaryEntityType: MatchEntityType.PAYMENT,
           primaryEntityId: payment.id,
+          events: [
+            evidence('PAYMENT_FAILED', 'PAYMENT', payment, payment.createdAt),
+            evidence('BANK_CREDIT_RECEIVED', 'BANK_TRANSACTION', bankCredit, bankCredit.transactionDate),
+          ],
         });
       }
     }

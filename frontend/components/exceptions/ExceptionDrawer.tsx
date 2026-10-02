@@ -206,7 +206,7 @@ export function ExceptionDrawer({
               </div>
 
               <div className="mt-6 pt-6 border-t" style={{ borderColor: C.border }}>
-                <AiChatThread exceptionId={id} initialAnalysis={exc.aiAnalyses?.[0]} />
+                <AiChatThread exceptionId={id} label={exc.exceptionId} initialAnalysis={exc.aiAnalyses?.[0]} />
               </div>
 
 

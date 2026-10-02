@@ -1,29 +1,27 @@
 import { Controller, Post, Get, Req, Query, Headers, RawBodyRequest, UseGuards, HttpCode } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { WebhooksService } from './webhooks.service.js';
 import * as crypto from 'crypto';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { THROTTLE } from '../../common/throttler/throttler.config.js';
 
 @Controller('webhooks')
 export class WebhooksController {
     constructor(private readonly webhooksService: WebhooksService) { }
 
+    // Unauthenticated endpoint: each request costs an HMAC verify + a DB write
+    // (invalid events are still persisted for audit). Cap a forged-webhook
+    // flood per source IP without dropping legitimate bursty delivery.
+    @Throttle({ default: THROTTLE.WEBHOOK })
     @Public()
     @Post('razorpay')
     @HttpCode(200)
     async handleRazorpay(
         @Req() req: RawBodyRequest<Request>,
         @Headers('x-razorpay-signature') signature: string,
-        @Headers('x-razorpay-timestamp') timestamp: string,
     ) {
-        // 0. Replay protection: reject if timestamp is missing or older than 5 minutes
-        const fiveMinutes = 5 * 60 * 1000;
-        const eventTime = Number(timestamp) * 1000; // Razorpay sends seconds
-        if (!timestamp || isNaN(eventTime) || Date.now() - eventTime > fiveMinutes) {
-            return { status: 'rejected', reason: 'stale_webhook' };
-        }
-
-        // 1. Verify signature
+        // 1. Verify signature over the raw body (Razorpay signs the exact bytes)
         const rawBody = req.rawBody?.toString() || '';
         const isValid = this.verifySignature(rawBody, signature);
 
@@ -39,10 +37,32 @@ export class WebhooksController {
             return { status: 'rejected', reason: 'invalid_signature' };
         }
 
-        // 4. Enqueue for async processing
+        // 4. Replay protection: reject clearly stale events. Razorpay does NOT
+        //    send a timestamp header on webhooks, so derive the event time from
+        //    the payload's `created_at` (seconds). When absent, we rely on the
+        //    unique event_id (find-then-create) + PENDING-only processing for
+        //    idempotency.
+        const fiveMinutes = 5 * 60 * 1000;
+        let createdAt: number | undefined;
+        try {
+            const parsed = JSON.parse(rawBody);
+            if (typeof parsed?.created_at === 'number') {
+                createdAt = parsed.created_at * 1000;
+            }
+        } catch {
+            // non-JSON body already captured for audit above
+        }
+        if (createdAt !== undefined && Date.now() - createdAt > fiveMinutes) {
+            // Mark the persisted event so it isn't left dangling in PENDING
+            // (it is never enqueued). Duplicates keep their existing status.
+            await this.webhooksService.markStale(event.id);
+            return { status: 'rejected', reason: 'stale_webhook' };
+        }
+
+        // 5. Enqueue for async processing
         await this.webhooksService.enqueue(event.id);
 
-        // 5. Return 200 quickly
+        // 6. Return 200 quickly
         return { status: 'accepted' };
     }
 

@@ -65,6 +65,8 @@ Welcome to the LedgerMind roadmap! We are tracking our progress across 8 distinc
 - [x] Build dashboard KPIs with Recharts
 - [x] Exception queue with filters
 - [x] Transaction investigation view
+- [x] Transactions: search, status/method, and date filters
+- [x] Transactions: payment & settlement drill-down drawer
 - [x] AI chat/command center
 - [x] Approval modals
 - [ ] *Final layout and UX tweaks pending*

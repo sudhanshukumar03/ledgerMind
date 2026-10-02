@@ -49,14 +49,20 @@ export class WebhookProcessor extends WorkerHost {
     try {
       await this.handleEvent(event.eventType, event.payload);
 
-      // Mark as PROCESSED
+      // Resolve the owning merchant from the affected entity so the event can
+      // be attributed for tenant-scoped listing and reconciliation.
+      const merchantId = await this.extractMerchantId(event.payload);
+
+      // Mark as PROCESSED (and attribute to the merchant when known)
       await this.prisma.webhookEvent.update({
         where: { id: event.id },
-        data: { processingStatus: WebhookProcessingStatus.PROCESSED },
+        data: {
+          processingStatus: WebhookProcessingStatus.PROCESSED,
+          ...(merchantId ? { merchantId } : {}),
+        },
       });
 
       // Trigger reconciliation for the affected merchant
-      const merchantId = await this.extractMerchantId(event.payload);
       if (merchantId) {
         await this.reconciliationService.runReconciliation({ merchantId });
       } else {

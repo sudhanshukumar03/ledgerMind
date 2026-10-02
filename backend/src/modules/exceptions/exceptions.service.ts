@@ -61,9 +61,11 @@ export class ExceptionsService {
             throw new NotFoundException('Exception not found');
         }
 
-        // According to schema, timeline is ordered by occurredAt to avoid reconciliation batching artifacts
+        // Query events by the resolved internal UUID — `id` may be a friendly
+        // EXC-… reference, and ExceptionEvent.exceptionId is a UUID FK, so using
+        // the raw param would throw an invalid-UUID error for friendly ids.
         const events = await this.prisma.exceptionEvent.findMany({
-            where: { exceptionId: id },
+            where: { exceptionId: exception.id },
             orderBy: { occurredAt: 'asc' }
         });
 

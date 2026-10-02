@@ -73,6 +73,28 @@
 }
 
 @layer components {
+  /* Wide AI responses (markdown tables) scroll horizontally with a
+     clearly visible track + thumb so the hidden columns are discoverable. */
+  .ai-table-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--borderStrong) var(--neutralTint);
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ai-table-scroll::-webkit-scrollbar { height: 10px; }
+  .ai-table-scroll::-webkit-scrollbar-track {
+    background: var(--neutralTint);
+    border-radius: 9999px;
+  }
+  .ai-table-scroll::-webkit-scrollbar-thumb {
+    background-color: var(--borderStrong);
+    border-radius: 9999px;
+    border: 2px solid var(--neutralTint);
+  }
+  .ai-table-scroll::-webkit-scrollbar-thumb:hover { background-color: var(--textMuted); }
+
   .card {
     background-color: var(--surface);
     border: 1px solid var(--border);

@@ -86,11 +86,27 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * A structured action the AI proposes. Never executed by the AI — the
+ * operator submits it via POST /actions where policy + human approval apply.
+ * ids are already resolved to internal UUIDs so it can be POSTed directly.
+ */
+export interface AiProposal {
+  action_type: 'REFUND' | 'CREATE_PAYMENT_LINK' | 'MARK_REVIEWED';
+  exception_id: string | null;
+  payment_id?: string;
+  order_id?: string;
+  amount?: number; // paise
+  reason: string;
+  requires_approval: true;
+}
+
 export interface ChatResponse {
   message: string;
   tool_calls_made: number;
   tool_calls?: { tool: string; args: any; result: any }[];
   suggested_actions: string[];
+  proposals?: AiProposal[];
 }
 
 export interface Payment {
@@ -111,6 +127,50 @@ export interface Settlement {
   utr?: string;
 }
 
+export interface Order {
+  id: string;
+  orderId: string;
+  amount: string;      // paise
+  currency: string;
+  status: string;
+  customerId?: string | null;
+  createdAt: string;
+}
+
+export interface Refund {
+  id: string;
+  refundId: string;
+  amount: string;      // paise
+  status: string;
+  createdAt: string;
+  processedAt?: string | null;
+}
+
+export interface BankTransaction {
+  id: string;
+  bankTxnId: string;
+  utr?: string | null;
+  amount: string;      // paise
+  transactionType: string;
+  transactionDate: string;
+  description?: string | null; // UNTRUSTED — render via PlainText
+  status: string;
+}
+
+/** GET /payments/:id — payment plus its linked order and refunds. */
+export interface PaymentDetail extends Payment {
+  currency?: string;
+  capturedAt?: string | null;
+  orderId?: string | null;
+  order?: Order | null;
+  refunds: Refund[];
+}
+
+/** GET /settlements/:id — settlement plus the bank transactions it covers. */
+export interface SettlementDetail extends Settlement {
+  bankTransactions: BankTransaction[];
+}
+
 export interface WebhookEvent {
   id: string;
   eventId: string;
@@ -126,4 +186,20 @@ export interface PaginatedResponse<T> {
   total: number;
   page: number;
   limit: number;
+}
+
+export interface AuditLog {
+  id: string;
+  merchantId: string;
+  userId: string | null;
+  actorType: 'USER' | 'SYSTEM' | 'AI';
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  beforeState: unknown | null;
+  afterState: unknown | null;
+  reason: string | null;
+  correlationId: string | null;
+  createdAt: string;
+  user?: { id: string; name: string; email: string } | null;
 }
