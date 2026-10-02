@@ -322,6 +322,8 @@ Base path **`/api/v1`**. Everything requires `Authorization: Bearer <jwt>` excep
 | `POST` | `/auth/login` | Authenticate; returns JWT. Rate-limited to **5/min** |
 | `GET` | `/dashboard/metrics` | Volume, reconciliation rate, open and critical exceptions, pending approvals |
 | `GET` | `/transactions` | Unified view across all five record types |
+| `GET` | `/payments` · `/settlements` | Paginated lists with search, status, method, and date filters |
+| `GET` | `/payments/:id` · `/settlements/:id` | One record with its linked order and refunds, or bank transactions |
 | `GET` | `/exceptions` | List and filter by status, type, severity |
 | `GET` | `/exceptions/:id` | Full detail, including `analysis` |
 | `GET` | `/exceptions/:id/timeline` | Events sorted by `occurred_at`, not row insert time |
