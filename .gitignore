@@ -1,27 +1,72 @@
-
-# Dependencies
+# Dependencies & Package Managers
 node_modules/
 .pnpm-store/
+.npm/
+.yarn/cache/
+.yarn/unplugged/
 
-# Builds
+# Build Outputs & Bundler Caches
 dist/
 .next/
 out/
 build/
+.turbo/
+.cache/
 
-# Environment files
+# TypeScript & Linter Artifacts
+*.tsbuildinfo
+.eslintcache
+
+# Testing & Coverage Artifacts
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.nyc_output/
+
+# AI Assistants & Skill Caches
+.agents/
+**/.agents/
+.claude/
+**/.claude/
+.cursor/
+**/.cursor/
+.devin/
+**/.devin/
+
+# Editor & IDE Directories
+.vscode/
+**/.vscode/
+.idea/
+**/.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# Environment & Local Configuration
 .env
 .env.local
 .env.production
 *.env
+*.local.json
+*.local
 
-# Logs
+# Logs & Audit Dumps
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-logs/
-*.log
+audit/
 
-# Operating System
+# Temporary & Backup Files
+*.bak
+*.tmp
+*.temp
+
+# Operating System Files
 .DS_Store
 Thumbs.db
+desktop.ini

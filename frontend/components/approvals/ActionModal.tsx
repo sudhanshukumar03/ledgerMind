@@ -75,7 +75,7 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
           <div className="px-6 py-4 border-b flex items-center justify-between bg-surface" style={{ borderColor: C.border }}>
             <div className="flex items-center gap-3">
               <ShieldAlert className="w-5 h-5" style={{ color: C.warning }} />
-              <h2 id="action-modal-title" className="text-[16px] font-bold" style={{ color: C.textPrimary }}>Review Action: {action.type.replace(/_/g, ' ')}</h2>
+              <h2 id="action-modal-title" className="text-[16px] font-bold" style={{ color: C.textPrimary }}>Review Action: {(action.type || (action as any).actionType || 'UNKNOWN').replace(/_/g, ' ')}</h2>
             </div>
             <button onClick={onClose} disabled={!!submitting} className="p-1 rounded-md transition-colors hover-bg-muted disabled:opacity-50">
               <X className="w-5 h-5 text-gray-500" />
@@ -160,7 +160,7 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
                       Proposed Action
                     </div>
                     <div className="text-[15px] font-bold" style={{ color: C.textPrimary }}>
-                      {action.type.replace(/_/g, ' ')}
+                      {(action.type || (action as any).actionType || 'UNKNOWN').replace(/_/g, ' ')}
                     </div>
                   </div>
                   {action.amount && (

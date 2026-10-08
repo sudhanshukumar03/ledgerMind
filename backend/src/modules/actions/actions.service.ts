@@ -53,6 +53,47 @@ export class ActionsService {
       throw new ForbiddenException(`Action denied by policy: ${policyResult.reason}`);
     }
 
+    if (createActionDto.action_type === ActionType.REFUND) {
+      const params = (createActionDto.parameters || {}) as { payment_id?: string; amount?: number };
+      let paymentId = params.payment_id;
+      if (!paymentId && exception.primaryEntityType === 'PAYMENT' && exception.primaryEntityId) {
+        paymentId = exception.primaryEntityId;
+      }
+      if (!paymentId) {
+        throw new BadRequestException('Refund action missing payment_id in parameters and could not be inferred');
+      }
+      if (this.prisma.payment) {
+        const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+        if (!payment) {
+          throw new BadRequestException('Payment not found');
+        }
+        if (payment.merchantId !== user.merchantId) {
+          throw new ForbiddenException('Payment does not belong to merchant');
+        }
+        let refundAmount: bigint;
+        try {
+          if (params.amount === undefined || params.amount === null) {
+            throw new Error('missing');
+          }
+          const amountStr = String(params.amount).trim();
+          if (!/^\d+$/.test(amountStr)) {
+            throw new Error('invalid format');
+          }
+          refundAmount = BigInt(amountStr);
+        } catch {
+          throw new BadRequestException('Refund amount must be a positive integer in paise');
+        }
+        if (refundAmount <= BigInt(0)) {
+          throw new BadRequestException('Refund amount must be a positive number of paise');
+        }
+        if (refundAmount > payment.amount) {
+          throw new BadRequestException(
+            `Refund amount ${refundAmount} exceeds original payment amount ${payment.amount}`,
+          );
+        }
+      }
+    }
+
     const action = await this.prisma.action.create({
       data: {
         merchantId: user.merchantId,
@@ -84,16 +125,28 @@ export class ActionsService {
       await this.executeAction(action.id, user.merchantId, user.id);
     }
 
-    return action;
+    return this.mapAction(action);
+  }
+
+  private mapAction(action: any) {
+    if (!action) return null;
+    const params = (action.parameters || {}) as Record<string, any>;
+    return {
+      ...action,
+      type: action.actionType,
+      amount: params.amount !== undefined && params.amount !== null ? params.amount.toString() : undefined,
+      reason: params.reason || action.reviewReason || '',
+    };
   }
 
   async getActions(merchantId: string, status?: ActionStatus) {
     const where = { merchantId, ...(status ? { status } : {}) };
-    return this.prisma.action.findMany({
+    const actions = await this.prisma.action.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       include: { exception: true },
     });
+    return actions.map((a) => this.mapAction(a));
   }
 
   async getActionById(id: string, merchantId: string) {
@@ -104,7 +157,7 @@ export class ActionsService {
     if (!action || action.merchantId !== merchantId) {
       throw new NotFoundException('Action not found');
     }
-    return action;
+    return this.mapAction(action);
   }
 
   async approveAction(id: string, userId: string, merchantId: string, dto: ApproveActionDto) {
@@ -150,7 +203,8 @@ export class ActionsService {
     // Trigger execution now that the action is approved
     await this.executeAction(id, merchantId, userId);
 
-    return this.prisma.action.findUnique({ where: { id } });
+    const finalAction = await this.prisma.action.findUnique({ where: { id } });
+    return this.mapAction(finalAction);
   }
 
   async rejectAction(id: string, userId: string, merchantId: string, dto: RejectActionDto) {
@@ -191,7 +245,7 @@ export class ActionsService {
       },
     });
 
-    return updatedAction;
+    return this.mapAction(updatedAction);
   }
 
   // ─── Execution Engine ───────────────────────────────────────────────────────

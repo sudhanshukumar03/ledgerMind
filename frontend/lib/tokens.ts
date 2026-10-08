@@ -1,9 +1,7 @@
 /**
- * LedgerMind Design Tokens
+ * LedgerMind Design System Tokens
  *
- * Single source of truth for all colors.
- * Use via inline style={{ color: C.textPrimary }} — NEVER as Tailwind color classes.
- * These map 1:1 to the locked design spec.
+ * Theme-aware color and surface tokens referencing CSS variables.
  */
 
 export const C = {

@@ -23,8 +23,8 @@ describe('AiService — proposal-only action tools', () => {
   it('request_refund returns a PROPOSAL and never mutates', async () => {
     const payment = { id: 'pay-uuid', paymentId: 'pay_ext', amount: 100000n, merchantId: MERCHANT };
     const prisma = {
-      payment: { findFirst: jest.fn().mockResolvedValue(payment) },
-      exception: { findFirst: jest.fn().mockResolvedValue({ id: 'exc-uuid' }) },
+      payment: { findFirst: (jest.fn() as any).mockResolvedValue(payment) },
+      exception: { findFirst: (jest.fn() as any).mockResolvedValue({ id: 'exc-uuid' }) },
       refund: { create: jest.fn(), upsert: jest.fn() },
       action: { create: jest.fn() },
     };
@@ -50,7 +50,7 @@ describe('AiService — proposal-only action tools', () => {
 
   it('request_refund rejects an amount exceeding the payment', async () => {
     const prisma = {
-      payment: { findFirst: jest.fn().mockResolvedValue({ id: 'pay-uuid', amount: 10000n, merchantId: MERCHANT }) },
+      payment: { findFirst: (jest.fn() as any).mockResolvedValue({ id: 'pay-uuid', amount: 10000n, merchantId: MERCHANT }) },
       exception: { findFirst: jest.fn() },
     };
     const service = makeService(prisma);
@@ -74,8 +74,8 @@ describe('AiService — proposal-only action tools', () => {
 
   it('create_payment_link returns a PROPOSAL with the external order id', async () => {
     const prisma = {
-      order: { findFirst: jest.fn().mockResolvedValue({ id: 'order-uuid', orderId: 'order_ext', merchantId: MERCHANT }) },
-      exception: { findFirst: jest.fn().mockResolvedValue({ id: 'exc-uuid' }) },
+      order: { findFirst: (jest.fn() as any).mockResolvedValue({ id: 'order-uuid', orderId: 'order_ext', merchantId: MERCHANT }) },
+      exception: { findFirst: (jest.fn() as any).mockResolvedValue({ id: 'exc-uuid' }) },
     };
     const service = makeService(prisma);
     const result: any = await (service as any).dispatchTool(
@@ -90,7 +90,7 @@ describe('AiService — proposal-only action tools', () => {
   });
 
   it('mark_for_review resolves the exception UUID and stays proposal-only', async () => {
-    const prisma = { exception: { findFirst: jest.fn().mockResolvedValue({ id: 'exc-uuid' }) } };
+    const prisma = { exception: { findFirst: (jest.fn() as any).mockResolvedValue({ id: 'exc-uuid' }) } };
     const service = makeService(prisma);
     const result: any = await (service as any).dispatchTool(
       'mark_for_review',

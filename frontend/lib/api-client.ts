@@ -1,9 +1,30 @@
 /**
- * LedgerMind API Client
+ * ─────────────────────────────────────────────────────────────────────────────
+ * LedgerMind Central API Client & Transport Layer
+ * ─────────────────────────────────────────────────────────────────────────────
  *
- * Single axios instance — all requests go through here.
- * Token is read from localStorage (set by the login page).
- * On 401, the user is redirected to /login.
+ * Architecture & Design Patterns:
+ * 1. SINGLETON AXIOS INSTANCE:
+ *    All client-side communication with the NestJS backend routes through this
+ *    configured instance, ensuring uniform headers, base URL routing, and security.
+ *
+ * 2. BEARER TOKEN INJECTION:
+ *    JWT access tokens stored in localStorage (`lm_token`) are injected into the
+ *    `Authorization` header via request interceptors before transmission.
+ *
+ * 3. GRACEFUL SESSION RECOVERY (401 Interceptor):
+ *    Unauthorized responses trigger an automatic token purge and redirect to
+ *    `/login`, preventing corrupted authentication states or stale sessions.
+ *
+ * 4. DOMAIN-DRIVEN API MODULES:
+ *    Grouped logically by financial domain:
+ *    - `authApi`: Credential verification and session generation.
+ *    - `dashboardApi`: Reconciled volume and KPI statistics aggregation.
+ *    - `exceptionsApi`: Exception queue queries and AI root-cause investigation triggers.
+ *    - `reconciliationApi`: Deterministic ladder trigger (`/run`) and historical audit runs.
+ *    - `actionsApi`: Remediation proposals, maker-checker approvals, and rejections.
+ *    - `aiApi`: Natural-language financial assistant command center chat.
+ *    - `transactionsApi`: Deep drill-down exploration for payments and settlements.
  */
 
 import axios from 'axios';
@@ -16,7 +37,7 @@ import type {
 
 export * from './types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
 
 export const api = axios.create({
   baseURL: BASE_URL,

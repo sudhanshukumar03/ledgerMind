@@ -4,7 +4,7 @@ NestJS modular monolith serving `/api/v1`, plus BullMQ workers. Nine modules, on
 
 > **The reconciliation engine is deterministic code. The AI has read-only tools and proposal tools. Nothing else may move money.**
 
-> Root overview: [../README.md](../README.md) · Diagrams: [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
+> Root overview: [../README.md](../README.md) · Diagrams: [../docs/architecture/diagrams.md](../docs/architecture/diagrams.md)
 
 ---
 
@@ -22,7 +22,7 @@ NestJS modular monolith serving `/api/v1`, plus BullMQ workers. Nine modules, on
 | `action/` | `PROPOSED → PENDING_APPROVAL → APPROVED → EXECUTING → COMPLETED/FAILED`, plus provider execution |
 | `audit/` | Correlated audit log for every state change, analysis, policy decision, and execution |
 
-Module dependency direction and the AI trust boundary are drawn in [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) §2 and §3.
+Module dependency direction and the AI trust boundary are drawn in [../docs/architecture/diagrams.md](../docs/architecture/diagrams.md) §2 and §3.
 
 ---
 
@@ -103,4 +103,4 @@ import { ReconciliationService } from "./reconciliation.service";     // ✗ fai
 
 This rule is backend-only; the frontend uses standard Next.js resolution.
 
-**Treat the API as frozen.** The frontend is built against the contract in [../docs/07-API-SPECIFICATION.md](../docs/07-API-SPECIFICATION.md); backend changes should be minimal, reviewed, and never made to accommodate a client convenience.
+**Treat the API as frozen.** The frontend is built against the contract in [../docs/specifications/api.md](../docs/specifications/api.md); backend changes should be minimal, reviewed, and never made to accommodate a client convenience.

@@ -1,20 +1,18 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: ledgermind-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ledgermind
-      POSTGRES_PASSWORD: ledgermind
-      POSTGRES_DB: ledgermind
+      POSTGRES_USER: ${POSTGRES_USER:-ledgermind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledgermind}
+      POSTGRES_DB: ${POSTGRES_DB:-ledgermind}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ledgermind -d ledgermind"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ledgermind} -d ${POSTGRES_DB:-ledgermind}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -24,13 +22,76 @@ services:
     container_name: ledgermind-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
-    command: ["redis-server", "--appendonly", "no", "--save", ""]
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--requirepass", "${REDIS_PASSWORD:-krama_redis_secret}"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-krama_redis_secret}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ledgermind-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ledgermind}:${POSTGRES_PASSWORD:-ledgermind}@postgres:5432/${POSTGRES_DB:-ledgermind}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-krama_redis_secret}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      AI_MODEL: ${AI_MODEL:-openai/gpt-oss-120b}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      AUTO_APPROVE_BELOW_AMOUNT: ${AUTO_APPROVE_BELOW_AMOUNT:-1000}
+      SWAGGER_ENABLED: "true"
+      SEED_DATABASE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api/v1}
+        NEXT_PUBLIC_AI_MODEL: ${NEXT_PUBLIC_AI_MODEL:-llama-3.3-70b-versatile}
+    container_name: ledgermind-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api/v1}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
 
 volumes:
   postgres_data:

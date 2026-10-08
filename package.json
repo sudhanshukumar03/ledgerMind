@@ -3,8 +3,44 @@
   "version": "1.0.0",
   "private": true,
   "description": "Autonomous Financial Reconciliation System & AI Finance Controller",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
     "dev:backend": "cd backend && npm run start:dev",
-    "dev:frontend": "cd frontend && npm run dev"
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "test:backend": "cd backend && npm run test:unit",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:frontend": "cd frontend && npm run lint",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "sprintf-js": "^1.1.3"
+  },
+  "overrides": {
+    "proxy-addr": "^2.0.8",
+    "sprintf-js": "$sprintf-js",
+    "argparse": {
+      "sprintf-js": "$sprintf-js"
+    },
+    "js-yaml": {
+      "argparse": {
+        "sprintf-js": "$sprintf-js"
+      }
+    },
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": {
+        "argparse": {
+          "sprintf-js": "$sprintf-js"
+        }
+      }
+    },
+    "sharp": "^0.35.5",
+    "source-map-js": "^1.2.2"
   }
 }

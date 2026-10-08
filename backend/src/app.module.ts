@@ -19,6 +19,7 @@ import { WorkersModule } from './workers/index.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { TransactionsModule } from './modules/transactions/transactions.module.js';
+import { HealthModule } from './modules/health/health.module.js';
 
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { RedisThrottlerStorage } from './common/throttler/redis-throttler-storage.js';
@@ -72,6 +73,7 @@ const throttlerStorage = new RedisThrottlerStorage();
     WorkersModule,
     DashboardModule,
     TransactionsModule,
+    HealthModule,
   ],
   providers: [
     // Register the shared Redis throttler storage so its OnApplicationShutdown

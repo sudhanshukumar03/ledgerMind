@@ -1,42 +1,44 @@
 # Build stage
 FROM node:20-alpine AS builder
 
+RUN apk add --no-cache openssl libc6-compat
+
 WORKDIR /usr/src/app
 
-# Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install dependencies
 RUN npm install
 
-# Copy source code
 COPY . .
 
-# Generate Prisma client
 RUN npx prisma generate
-
-# Build the application
 RUN npm run build
 
 # Production stage
 FROM node:20-alpine
 
+RUN apk add --no-cache openssl libc6-compat
+
 WORKDIR /usr/src/app
 
-# Copy package files
 COPY package*.json ./
-
-# Copy built assets and dependencies from builder
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/prisma ./prisma
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
-# Expose port (adjust if your NestJS app uses a different port)
-EXPOSE 3000
+RUN chmod +x ./docker-entrypoint.sh && chown -R node:node /usr/src/app
 
-# Run as non-root user
 USER node
 
-# Start the application
-CMD ["npm", "run", "start:prod"]
+ENV NODE_ENV=production
+ENV PORT=3001
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/api/v1/health || exit 1
+
+ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
+CMD ["node", "dist/main.js"]

@@ -240,20 +240,20 @@ flowchart LR
 
 Look at the last edge. Executing an action produces a *new* webhook, which re-enters reconciliation and resolves the original exception. The loop closes itself — nobody marks anything done by hand.
 
-📐 **Twelve more diagrams** — matching ladder, trust boundaries, exception classification, state machines, data model, frontend flow — in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+📐 **Twelve more diagrams** — matching ladder, trust boundaries, exception classification, state machines, data model, frontend flow — in **[docs/architecture/diagrams.md](docs/architecture/diagrams.md)**.
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Recharts, lucide-react |
-| Backend | NestJS 10 (modular monolith), Prisma 5, PostgreSQL 16 |
-| Async | Redis + BullMQ — normalize, reconcile, execute queues |
-| AI | Groq API via `openai` — function calling over read-only tools |
-| Auth | JWT Bearer + RBAC (`ADMIN`, `FINANCE`, `VIEWER`) |
-| Validation | Zod (frontend), `class-validator` + `class-transformer` (backend DTOs) |
+| Frontend | Next.js 16 (App Router + Turbopack), React 19, TypeScript, Tailwind CSS, Lucide, Recharts |
+| Backend | NestJS 12 (modular monolith), Prisma 5, PostgreSQL 16 |
+| Async | Redis 7 + BullMQ — normalize, reconcile, and event worker queues |
+| AI | Groq API (`llama-3.3-70b-versatile`) via OpenAI SDK — function calling over read-only tools |
+| Auth | Multi-tenant JWT Bearer + RBAC (`ADMIN`, `FINANCE`, `VIEWER`) |
+| Validation | Zod, `class-validator` + `class-transformer` (strict NestJS DTO validation) |
 | Testing | Jest, Supertest, Playwright |
-| Local infra | Docker Compose — PostgreSQL + Redis |
+| Containers | Docker Compose — multi-stage non-root containers (`postgres`, `redis`, `backend`, `frontend`) |
 | Deployment | Vercel (frontend) · Render / Railway (API + workers) |
 
 ---
@@ -284,22 +284,38 @@ Fill in the required values:
 | `RAZORPAY_WEBHOOK_SECRET` | HMAC SHA256 verification secret |
 | `POLICY_REFUND_MAX_PAISE` | Refund ceiling the Policy Engine enforces |
 
-Then bring it up:
+### Option A — 1-Command Docker Compose (Recommended)
+
+Run the full stack (Postgres 16, Redis 7, NestJS API + Queue Workers, Next.js Frontend):
 
 ```bash
-docker-compose up -d postgres redis   # infrastructure
-npm install
-npm run prisma:migrate                # prisma migrate dev — never db push
-npm run seed                          # records, but deliberately zero exceptions
-npm run start:dev                     # API + workers + frontend
+docker compose up --build
+```
+
+This automatically:
+1. Provisions PostgreSQL and Redis with health checks.
+2. Synchronizes Prisma schema and seeds demo credentials.
+3. Serves the NestJS API with Swagger docs at `http://localhost:3001/api`.
+4. Serves the optimized Next.js frontend at `http://localhost:3000`.
+
+### Option B — Local Development
+
+```bash
+docker compose up -d postgres redis   # launch database & redis
+npm run dev:backend                   # in terminal 1 (starts NestJS on :3001)
+npm run dev:frontend                  # in terminal 2 (starts Next.js on :3000)
 ```
 
 | Service | URL |
 | --- | --- |
 | Frontend | http://localhost:3000 |
 | API | http://localhost:3001/api/v1 |
+| Swagger Docs | http://localhost:3001/api |
 
-The API port comes from `PORT` in `backend/.env`; the frontend finds it via `NEXT_PUBLIC_API_BASE_URL`. Change one and you must change the other. Log in with a seeded user — the seed script prints the credentials. Roles are `ADMIN` (approves actions), `FINANCE` (proposes), `VIEWER` (read-only).
+Log in with seeded demo users:
+- **Admin**: `admin@ledgermind.dev` / `demo1234`
+- **Finance**: `finance@ledgermind.dev` / `demo1234`
+- **Viewer**: `viewer@ledgermind.dev` / `demo1234`
 
 ### Making exceptions appear
 
@@ -352,7 +368,7 @@ Base path **`/api/v1`**. Everything requires `Authorization: Bearer <jwt>` excep
 
 **`merchantId` is never a request parameter.** It's derived from the JWT on every call, including inside AI tool execution. A client that sends one is confused at best.
 
-Full schemas: **[docs/07-API-SPECIFICATION.md](docs/07-API-SPECIFICATION.md)**.
+Full schemas: **[docs/specifications/api.md](docs/specifications/api.md)**.
 
 ---
 
@@ -363,8 +379,7 @@ ledgermind/
 ├── backend/                    # NestJS API + BullMQ workers
 │   ├── prisma/
 │   │   ├── schema.prisma       # Single source of truth for the data model
-│   │   ├── migrations/
-│   │   └── seed.ts             # Seeds records — never exceptions
+│   │   └── seed.ts             # Deterministic development seed
 │   ├── src/
 │   │   ├── auth/               # JWT, RBAC guards, login throttle
 │   │   ├── webhook/            # HMAC verify, raw-body ingress, idempotency
@@ -375,15 +390,17 @@ ledgermind/
 │   │   ├── policy/             # Evaluates every proposal
 │   │   ├── action/             # Proposal → approval → execution
 │   │   ├── audit/              # Correlated audit log
-│   │   └── main.ts             # BigInt toJSON patch + rawBody: true
+│   │   └── main.ts             # BigInt serialization + security configuration
 │   └── test/
-├── frontend/                   # Next.js dashboard → see frontend/README.md
+├── frontend/                   # Next.js dashboard
 │   ├── app/                    # App Router routes
-│   ├── components/             # UI + shadcn layer
-│   └── lib/                    # api-client, money formatting, cn()
-├── docs/                       # Design documentation
-├── scripts/
-│   └── generate-bank-data.ts   # Synthetic mismatch generator
+│   ├── components/             # UI component library
+│   └── lib/                    # api-client, money formatting, tokens
+├── docs/                       # Structured design & architecture documentation
+│   ├── architecture/           # Overview, diagrams, reconciliation, state machines
+│   ├── specifications/         # API, database, AI agent, security
+│   ├── product/                # Problem statement, PRD, requirements, user flows
+│   └── operations/             # Testing plan, error handling, Groq setup
 ├── docker-compose.yml
 └── README.md
 ```
@@ -394,24 +411,29 @@ Two conventions to know before editing: the **backend is ES modules, so relative
 
 ## Documentation
 
-| Doc | What it covers |
-| --- | --- |
-| [01-PROBLEM.md](docs/01-PROBLEM.md) | Why reconciliation *investigation* is the real cost |
-| [03-REQUIREMENTS.md](docs/03-REQUIREMENTS.md) | Functional and non-functional requirements |
-| [04-USER-FLOWS.md](docs/04-USER-FLOWS.md) | Operator journeys end to end |
-| [05-SYSTEM-ARCHITECTURE.md](docs/05-SYSTEM-ARCHITECTURE.md) | Module boundaries, queues, deployment topology |
-| [06-DATABASE-SCHEMA.md](docs/06-DATABASE-SCHEMA.md) | Tables, indexes, dedup keys, denormalized `merchant_id` |
-| [07-API-SPECIFICATION.md](docs/07-API-SPECIFICATION.md) | Every endpoint, request and response shape |
-| [08-AI-AGENT-SPECIFICATION.md](docs/08-AI-AGENT-SPECIFICATION.md) | Tool catalogue, prompt versioning, safety boundary |
-| [09-PAYMENT-STATE-MACHINE.md](docs/09-PAYMENT-STATE-MACHINE.md) | Legal payment and refund transitions |
-| [10-RECONCILIATION-LOGIC.md](docs/10-RECONCILIATION-LOGIC.md) | Matching ladder, scoring, classification |
-| [11-SECURITY.md](docs/11-SECURITY.md) | Auth, tenancy isolation, webhook verification, injection defence |
-| [12-ERROR-HANDLING.md](docs/12-ERROR-HANDLING.md) | Backend error taxonomy, frontend error states (§5) |
-| [13-TESTING-PLAN.md](docs/13-TESTING-PLAN.md) | Coverage strategy and critical-path tests |
-| [14-BUILDATHON-DEMO.md](docs/14-BUILDATHON-DEMO.md) | The demo script, beat by beat |
-| [15-SYSTEM-DESIGN-CONCEPTS.md](docs/15-SYSTEM-DESIGN-CONCEPTS.md) | Design principles behind the architecture |
-| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | **All flowcharts and design-flow diagrams** |
-| **[DEMO-VIDEO-RUNBOOK.md](docs/DEMO-VIDEO-RUNBOOK.md)** | **Pre-flight, recording setup, timed narration script** |
+Full documentation index available at **[docs/README.md](docs/README.md)**.
+
+### Architecture
+- **[System Architecture](docs/architecture/overview.md)** — Module boundaries, queues, deployment topology.
+- **[Architecture Diagrams](docs/architecture/diagrams.md)** — Matching ladder, trust boundaries, state machines, and data models.
+- **[Reconciliation Engine](docs/architecture/reconciliation.md)** — Matching ladder, scoring, and classification.
+- **[Payment State Machine](docs/architecture/state-machines.md)** — Legal payment and refund state transitions.
+- **[Design Concepts](docs/architecture/design-concepts.md)** — Design principles, financial invariants, and fault tolerance.
+
+### Specifications
+- **[API Specification](docs/specifications/api.md)** — Endpoints, request and response schemas.
+- **[Database Schema](docs/specifications/database.md)** — Tables, indexes, dedup keys, denormalized tenant models.
+- **[AI Agent Specification](docs/specifications/ai-agent.md)** — Tool catalogue, prompt versioning, safety boundaries.
+- **[Security & Multi-Tenancy](docs/specifications/security.md)** — Auth, tenancy isolation, webhook verification, injection defense.
+
+### Product & Operations
+- **[Problem Statement](docs/product/problem.md)** — Why reconciliation investigation is the real operational cost.
+- **[Product Requirements (PRD)](docs/product/prd.md)** — Features, persona definitions, and metrics.
+- **[Requirements Matrix](docs/product/requirements.md)** — Functional and non-functional requirements.
+- **[User Flows](docs/product/user-flows.md)** — Operator journeys end to end.
+- **[Testing & QA Plan](docs/operations/testing.md)** — Coverage strategy and critical-path tests.
+- **[Error Handling Taxonomy](docs/operations/error-handling.md)** — Backend error taxonomy and frontend error states.
+- **[Groq AI Setup](docs/operations/groq-setup.md)** — Model configuration and verification runbook.
 
 ---
 
@@ -428,17 +450,15 @@ Three suites carry the weight. The **matching ladder**, because a wrong match is
 
 ---
 
-## See it in five beats
+## End-to-End Operational Lifecycle
 
-The scripted path, driven by the demo spine — a **₹50,000 payment the gateway marked `FAILED`** while the bank shows a **₹50,000 credit under `UTR-DEMO-001`**:
+The operational lifecycle resolves state discrepancies — for example, a **₹50,000 payment marked `FAILED` by the gateway** while the bank statement records a **₹50,000 credit**:
 
-1. **A clean queue.** KPI row green, nothing needing attention. This is what reconciled looks like.
-2. **Reality arrives.** `npm run generate:bank-data` writes bank records that disagree with the gateway, then a reconciliation run sorts what it can and classifies what it can't.
-3. **One exception, at the top.** `BANK_PAYMENT_MISMATCH`, critical, ₹50,000 of exposure — first because it's expensive, not because it's new.
-4. **The investigation is already done.** Root cause, confidence, and every record it read. Including the bank description with an instruction-shaped string in it, which it correctly treated as text.
-5. **Someone says yes.** Policy evaluates, an `ADMIN` approves, the action executes, the audit trail closes, and the resulting webhook reconciles the exception away.
-
-Full script: **[docs/14-BUILDATHON-DEMO.md](docs/14-BUILDATHON-DEMO.md)** · Recording it: **[docs/DEMO-VIDEO-RUNBOOK.md](docs/DEMO-VIDEO-RUNBOOK.md)**
+1. **Deterministic Ingestion & Matching.** Ledger records are ingested across internal orders, gateway transactions, and bank statements. The reconciliation engine runs matching algorithms and categorizes balance exceptions.
+2. **Discrepancy Identification.** A `BANK_PAYMENT_MISMATCH` is flagged with severity and financial exposure calculated from minor-unit amounts.
+3. **AI Investigation.** The AI Controller gathers evidence via read-only tools, reviews transaction event histories, and synthesizes root causes without mutating financial state.
+4. **Governed Human Approval.** Proposed resolutions (such as payment links or refunds) are evaluated by the deterministic Policy Engine and queued for mandatory human approval.
+5. **Execution & Audit Closure.** Upon authorized sign-off, the action is executed with full cryptographic audit logging and status synchronization.
 
 ---
 

@@ -64,12 +64,12 @@ Action Engine executes (calls Razorpay API) if approved
 Audit Agent logs actor, reason, before/after state
 ```
 
-_(Note: expand this into a sequence diagram once the NestJS module boundaries are finalized — see `docs/05-SYSTEM-ARCHITECTURE.md` for the component diagram this flow maps to.)_
+_(Note: expand this into a sequence diagram once the NestJS module boundaries are finalized — see `docs/architecture/overview.md` for the component diagram this flow maps to.)_
 
 ## Model Selection
 
-- Primary model: **Groq API 3.6 Flash** (or higher), with function calling enabled.
-- The tool definitions are provided as Function Declarations to the Groq API.
+- Primary model: **`llama-3.3-70b-versatile`** on Groq (configurable via the `AI_MODEL` env var), with function calling enabled.
+- Tool definitions are provided as standard OpenAI-style JSON tool schemas through Groq's OpenAI-compatible endpoint (`https://api.groq.com/openai/v1`).
 - The backend parses the function call requests and executes the corresponding NestJS service methods.
 - Responses are formatted as JSON for the frontend.
 

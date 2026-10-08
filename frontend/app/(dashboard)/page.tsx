@@ -38,7 +38,7 @@ const buildRecap = (stats: DashboardStats | undefined) => {
   }
 
   if (clauses.length === 0) {
-    return 'All quiet today — nothing new to report. ✅';
+    return 'All transactions balanced. No active exceptions detected today.';
   }
 
   const last = clauses.pop();
@@ -48,7 +48,7 @@ const buildRecap = (stats: DashboardStats | undefined) => {
   } else {
     sentence = last;
   }
-  return `Today so far: ${sentence}.`;
+  return `Reconciliation overview: ${sentence}.`;
 };
 
 export default function DashboardPage() {

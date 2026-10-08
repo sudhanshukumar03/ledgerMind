@@ -26,7 +26,7 @@ export class WebhooksController {
         const isValid = this.verifySignature(rawBody, signature);
 
         // 2. Always store raw event (even if invalid, for audit)
-        const event = await this.webhooksService.storeWebhookEvent(
+        const { event, isDuplicate } = await this.webhooksService.storeWebhookEvent(
             rawBody,
             signature,
             isValid,
@@ -35,6 +35,10 @@ export class WebhooksController {
         // 3. If invalid, reject immediately
         if (!isValid) {
             return { status: 'rejected', reason: 'invalid_signature' };
+        }
+
+        if (isDuplicate) {
+            return { status: 'ignored', reason: 'duplicate_event' };
         }
 
         // 4. Replay protection: reject clearly stale events. Razorpay does NOT

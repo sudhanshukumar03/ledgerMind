@@ -170,4 +170,52 @@ describe('ActionsService (authorization invariants)', () => {
       expect(prisma.auditLog.create).toHaveBeenCalled();
     });
   });
+
+  describe('createAction (refund amount validation)', () => {
+    const payment = { id: 'pay-1', merchantId: MERCHANT, amount: BigInt(10000) };
+    const exception = { id: 'exc-1', merchantId: MERCHANT, primaryEntityType: 'PAYMENT', primaryEntityId: 'pay-1' };
+
+    it('rejects refund actions with decimal amounts (FUN-001)', async () => {
+      prisma.user.findUnique.mockResolvedValue(adminUser);
+      prisma.exception.findUnique.mockResolvedValue(exception);
+      prisma.payment = { findUnique: jest.fn(() => Promise.resolve(payment)) };
+
+      await expect(
+        service.createAction(adminUser.id, {
+          exception_id: 'exc-1',
+          action_type: ActionType.REFUND,
+          parameters: { payment_id: 'pay-1', amount: 50.25 as any },
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects refund actions with malformed non-integer string amounts', async () => {
+      prisma.user.findUnique.mockResolvedValue(adminUser);
+      prisma.exception.findUnique.mockResolvedValue(exception);
+      prisma.payment = { findUnique: jest.fn(() => Promise.resolve(payment)) };
+
+      await expect(
+        service.createAction(adminUser.id, {
+          exception_id: 'exc-1',
+          action_type: ActionType.REFUND,
+          parameters: { payment_id: 'pay-1', amount: 'abc' as any },
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts valid integer paise amounts and creates action', async () => {
+      prisma.user.findUnique.mockResolvedValue(adminUser);
+      prisma.exception.findUnique.mockResolvedValue(exception);
+      prisma.payment = { findUnique: jest.fn(() => Promise.resolve(payment)) };
+
+      const action = await service.createAction(adminUser.id, {
+        exception_id: 'exc-1',
+        action_type: ActionType.REFUND,
+        parameters: { payment_id: 'pay-1', amount: 5000 },
+      });
+
+      expect(action).toBeDefined();
+      expect(prisma.action.create).toHaveBeenCalled();
+    });
+  });
 });

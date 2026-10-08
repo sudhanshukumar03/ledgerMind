@@ -3,11 +3,8 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { Prisma, Severity, ReconciliationRunStatus, MatchEntityType, MatchMethod, ExceptionType, ImpactLevel, ExceptionStatus, Order, Payment, Refund, Settlement, BankTransaction } from '@prisma/client';
 
 /**
- * One evidence item on an exception's timeline. The reconciliation engine emits
- * these from the same entities it inspects while matching, so the timeline in
- * the UI reconstructs *why* the exception exists (doc 07). `occurredAt` is the
- * real financial timestamp of the underlying entity — NOT the run time — so
- * evidence sorts in the order events actually happened.
+ * Evidence item for an exception audit trail.
+ * Invariant: occurredAt reflects the domain event timestamp, not the run timestamp, to preserve chronology.
  */
 export interface ExceptionEventDraft {
   eventType: string;
@@ -33,10 +30,8 @@ export interface ExceptionDraft {
 }
 
 /**
- * Serialise a Prisma entity into a plain JSON snapshot safe for a Json column:
- * BigInt → string (paise), Date → ISO string (via Date.prototype.toJSON). Kept
- * local so the engine does not depend on the global BigInt.toJSON patch in
- * main.ts (which is absent under unit tests).
+ * Serializes Prisma entities into JSON-safe snapshots for Json columns.
+ * Converts BigInt to string to avoid serialization failures in environments without a global BigInt.toJSON patch.
  */
 function toSnapshot(entity: unknown): Prisma.InputJsonValue {
   return JSON.parse(
@@ -46,7 +41,6 @@ function toSnapshot(entity: unknown): Prisma.InputJsonValue {
   );
 }
 
-/** Build an evidence event from an entity, falling back to now if it carries no timestamp. */
 function evidence(
   eventType: string,
   entityType: string,
@@ -77,36 +71,27 @@ export interface RunReconciliationArgs {
   dateTo?: string;
 }
 
+/**
+ * Deterministic 3-way reconciliation engine (Gateway, Bank, Ledger).
+ * Matching ladder: Exact ID -> UTR -> Amount and time window proximity.
+ */
 @Injectable()
 export class ReconciliationService {
   private readonly logger = new Logger(ReconciliationService.name);
 
-  /**
-   * The reconciliation engine is deterministic code.
-   * 
-   * It uses a 3-level matching ladder:
-   * 1. Exact ID (order_id, payment_id)
-   * 2. UTR match (bank <-> settlement)
-   * 3. Amount + time proximity (one-to-one enforced)
-   * 
-   * Every match is logged to the audit trail. The AI never touches this module.
-   */
-
-  // Configurables for scoring
-  private readonly FINANCIAL_IMPACT_WEIGHT = 0.5; // score per unit difference
-  private readonly CUSTOMER_IMPACT_WEIGHT = 20; // HIGH = 3, MEDIUM = 2, LOW = 1
-  private readonly AGE_WEIGHT = 0.5; // per hour
+  // Weights prioritize customer-facing exposure first, followed by monetary scale and unresolved duration.
+  private readonly FINANCIAL_IMPACT_WEIGHT = 0.5;
+  private readonly CUSTOMER_IMPACT_WEIGHT = 20;
+  private readonly AGE_WEIGHT = 0.5;
   private readonly RECURRENCE_WEIGHT = 5;
 
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Runs a full reconciliation pass across all merchants.
-   * 
-   * This is idempotent — calling it multiple times will not
-   * create duplicate exceptions due to `dedup_key` constraints.
-   * 
-   * @returns {Promise<any>} The run results and stats.
+   * Reconciles gateway records against bank transactions for a single merchant over an optional window.
+   * Idempotent: repeated runs update severity and occurrence counts without creating duplicate exceptions.
+   *
+   * @throws PrismaClientKnownRequestError if transaction persistence fails.
    */
   async runReconciliation(args: RunReconciliationArgs) {
     const { merchantId, dateFrom, dateTo } = args;
@@ -116,7 +101,6 @@ export class ReconciliationService {
     if (dateTo) dateFilter['lte'] = new Date(dateTo);
     const dateCondition = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
 
-    // 1. Fetch data
     const [orders, payments, refunds, settlements, bankTransactions] = await Promise.all([
       this.prisma.order.findMany({ where: { merchantId, ...dateCondition } }),
       this.prisma.payment.findMany({ where: { merchantId, ...dateCondition } }),
@@ -128,15 +112,13 @@ export class ReconciliationService {
     const exceptionsToUpsert: ExceptionDraft[] = [];
     const matchesToCreate: MatchDraft[] = [];
 
-    // 2. Apply Rules & Collect Matches
     this.checkOrderPayment(orders, payments, exceptionsToUpsert, matchesToCreate, merchantId);
     this.checkPaymentSettlement(payments, settlements, exceptionsToUpsert, matchesToCreate, merchantId);
     this.checkSettlementBank(settlements, bankTransactions, exceptionsToUpsert, matchesToCreate, merchantId);
     this.checkRefundDelay(refunds, exceptionsToUpsert, merchantId);
-    // Rule 5: Bank credit exists for a FAILED payment — the primary demo scenario
+    // Detects orphan credits where the bank settled funds despite gateway failure.
     this.checkBankPaymentMismatch(payments, bankTransactions, exceptionsToUpsert, merchantId);
 
-    // 3. Save Exceptions and Matches within Transaction
     const results = await this.prisma.$transaction(async (tx) => {
       const run = await tx.reconciliationRun.create({
         data: {
@@ -174,7 +156,6 @@ export class ReconciliationService {
       for (const exc of exceptionsToUpsert) {
         const existing = await tx.exception.findUnique({ where: { dedupKey: exc.dedupKey } });
         
-        // Dynamic Severity Calculation
         const occurrenceCount = existing ? existing.occurrenceCount + 1 : 1;
         const now = new Date();
         const firstSeen = existing ? existing.createdAt : now;
@@ -184,6 +165,7 @@ export class ReconciliationService {
         if (exc.customerImpact === 'HIGH') customerImpactRating = 3;
         if (exc.customerImpact === 'MEDIUM') customerImpactRating = 2;
 
+        // Difference amount is stored in paise; convert to rupees so weight scales with standard currency units.
         const diffAmtStr = exc.differenceAmount.toString();
         const diffNum = Number(diffAmtStr);
         const diffInRupees = Math.abs(diffNum) / 100;
@@ -211,7 +193,7 @@ export class ReconciliationService {
           await this.writeExceptionEvents(tx, existing.id, exc, now);
           updated++;
         } else {
-          // Generate unique Exception ID: EXC-YYYYMMDD-HHMMSS-XXX
+          // Counter suffix guarantees unique keys when multiple exceptions are detected within the same second.
           const timestamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
           const excId = `EXC-${timestamp}-${counter.toString().padStart(3, '0')}`;
           counter++;
@@ -250,19 +232,17 @@ export class ReconciliationService {
     };
   }
 
-  // --- Rule Hierarchy Implementations ---
-
-  /** Strip the transient `events` array so only Exception scalar columns reach Prisma. */
+  /**
+   * Strips transient timeline events so draft payloads match the Prisma Exception table schema.
+   */
   private toExceptionData(exc: ExceptionDraft) {
     const { events: _events, ...data } = exc;
     return data;
   }
 
   /**
-   * Persist an exception's evidence timeline plus a terminal EXCEPTION_DETECTED
-   * marker. Idempotent across re-runs via the (exceptionId, eventType, entityId)
-   * unique constraint, so a repeated reconciliation refreshes snapshots rather
-   * than duplicating rows.
+   * Persists evidence timeline events and appends the terminal EXCEPTION_DETECTED record.
+   * Upserts ensure re-runs refresh state snapshots without duplicating timeline entries.
    */
   private async writeExceptionEvents(
     tx: Prisma.TransactionClient,
@@ -311,6 +291,10 @@ export class ReconciliationService {
     }
   }
   
+  /**
+   * Identifies breaks between orders and gateway payments.
+   * Flags unpaid orders with missing capture, split/duplicate captures, and currency amount mismatches.
+   */
   private checkOrderPayment(orders: Order[], payments: Payment[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
     for (const order of orders) {
       if (order.status !== 'PAID') continue;
@@ -389,12 +373,16 @@ export class ReconciliationService {
     }
   }
 
+  /**
+   * Matches captured payments to settlement batches within a 7-day clearing window.
+   * Flags captured payments that have no corresponding settlement batch.
+   */
   private checkPaymentSettlement(payments: Payment[], settlements: Settlement[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
     const captured = payments.filter((p) => p.status === 'CAPTURED');
     const availableSettlements = new Set(settlements.map((s) => s.id));
 
     for (const payment of captured) {
-      // Level 1/3 Match equivalent logic for settlements
+      // 7-day window accommodates standard rolling settlement batch schedules.
       const matched = settlements.find((s) => 
         availableSettlements.has(s.id) && 
         s.amount === payment.amount &&
@@ -417,6 +405,7 @@ export class ReconciliationService {
           events: [evidence('PAYMENT_CAPTURED', 'PAYMENT', payment, payment.createdAt)],
         });
       } else {
+        // Enforce 1-to-1 matching to prevent multiple payments claiming the same settlement batch.
         availableSettlements.delete(matched.id);
         matches.push({
           sourceType: MatchEntityType.PAYMENT,
@@ -430,15 +419,18 @@ export class ReconciliationService {
     }
   }
 
+  /**
+   * Reconciles gateway settlement records against bank account credit entries.
+   * Prefers exact UTR identifier matching; falls back to exact amount within a 3-day clearing window.
+   */
   private checkSettlementBank(settlements: Settlement[], bankTransactions: BankTransaction[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
     const availableBankTxns = new Set(bankTransactions.map(b => b.id));
 
     for (const s of settlements) {
-      // Level 2 Match: Exact UTR
       let match = bankTransactions.find((b) => availableBankTxns.has(b.id) && b.utr && b.utr === s.utr);
       let matchMethod: MatchMethod = MatchMethod.UTR;
       
-      // Level 3 Match: Fallback Amount Proximity
+      // Fallback handles bank statements missing explicit UTR headers within standard NEFT/RTGS settlement turnaround.
       if (!match) {
         match = bankTransactions.find((b) => 
           availableBankTxns.has(b.id) && 
@@ -498,6 +490,9 @@ export class ReconciliationService {
     }
   }
 
+  /**
+   * Flags refunds stuck in PROCESSING beyond the 24-hour SLA threshold.
+   */
   private checkRefundDelay(refunds: Refund[], exceptions: ExceptionDraft[], merchantId: string) {
     const now = new Date();
     for (const r of refunds) {
@@ -524,11 +519,8 @@ export class ReconciliationService {
   }
 
   /**
-   * Rule 5 — Bank credit exists for a FAILED payment.
-   * This is the primary demo scenario (docs/14-BUILDATHON-DEMO.md Scene 3).
-   * A FAILED payment means the merchant was NOT supposed to receive money,
-   * yet the bank statement shows a corresponding credit — indicating a
-   * payment-state inconsistency between the gateway and the bank.
+   * Flags state divergence where the bank received credit for a payment marked FAILED by the gateway.
+   * Occurs during late gateway drop-offs where the acquiring bank captured funds but callback failed.
    */
   private checkBankPaymentMismatch(
     payments: Payment[],
@@ -538,20 +530,20 @@ export class ReconciliationService {
   ) {
     const failedPayments = payments.filter((p) => p.status === 'FAILED');
     for (const payment of failedPayments) {
-      // Match by amount only — UTR is not available on failed payments
+      // UTR is unavailable on failed gateway transactions; match against unreconciled credits by amount.
       const bankCredit = bankTransactions.find(
         (b) =>
           b.transactionType === 'CREDIT' &&
           b.amount === payment.amount &&
-          !b.settlementId, // unreconciled bank credit
+          !b.settlementId,
       );
       if (bankCredit) {
         exceptions.push({
           type: ExceptionType.BANK_PAYMENT_MISMATCH,
           merchantId,
           status: 'OPEN',
-          expectedAmount: BigInt(0),      // expected: no credit (payment failed)
-          actualAmount: payment.amount,   // actual: bank shows credit
+          expectedAmount: BigInt(0),
+          actualAmount: payment.amount,
           differenceAmount: payment.amount,
           financialImpact: payment.amount,
           customerImpact: ImpactLevel.HIGH,
@@ -567,11 +559,8 @@ export class ReconciliationService {
     }
   }
 
-  // ─── Query Methods ──────────────────────────────────────────────────────────
-
   /**
-   * Returns the 20 most recent reconciliation runs for a merchant.
-   * Used by GET /reconciliation/runs (frontend ReconciliationPage).
+   * Fetches recent reconciliation runs for a merchant with ISO-formatted timestamps for JSON clients.
    */
   async listRuns(merchantId: string) {
     const rows = await this.prisma.reconciliationRun.findMany({
@@ -579,7 +568,6 @@ export class ReconciliationService {
       orderBy: { startedAt: 'desc' },
       take: 20,
     });
-    // Serialise BigInt fields for JSON transport
     return rows.map((r) => ({
       ...r,
       startedAt: r.startedAt?.toISOString(),
@@ -588,9 +576,7 @@ export class ReconciliationService {
   }
 
   /**
-   * Aggregated stats consumed by:
-   *  - GET /reconciliation/stats  → dashboardApi.getStats()
-   * Shape matches the DashboardStats interface in api-client.ts.
+   * Aggregates merchant ledger metrics: capture volume, match rate, and active exception breakdowns.
    */
   async getStats(merchantId: string) {
     const [
@@ -622,9 +608,9 @@ export class ReconciliationService {
         _count: { _all: true },
       }),
       this.prisma.payment.count({ where: { merchantId } }),
-      // matchedCount: count distinct payment-level matches across all runs
+      // Counts payment-level matches to calculate reconciliation coverage against total captured payments.
       this.prisma.reconciliationMatch.count({
-        where: { sourceType: MatchEntityType.PAYMENT },
+        where: { sourceType: MatchEntityType.PAYMENT, run: { merchantId } },
       }),
       this.prisma.exception.count({
         where: {

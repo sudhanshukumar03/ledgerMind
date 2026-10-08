@@ -44,11 +44,13 @@ export class WebhooksService {
     const existing = await this.prisma.webhookEvent.findUnique({ where: { eventId: key } });
 
     if (existing) {
-      await this.prisma.webhookEvent.update({
-        where: { eventId: key },
-        data: { processingStatus: WebhookProcessingStatus.IGNORED_DUPLICATE },
-      });
-      return existing;
+      if (existing.processingStatus !== WebhookProcessingStatus.PROCESSED) {
+        await this.prisma.webhookEvent.update({
+          where: { eventId: key },
+          data: { processingStatus: WebhookProcessingStatus.IGNORED_DUPLICATE },
+        });
+      }
+      return { event: existing, isDuplicate: true };
     }
 
     const event = await this.prisma.webhookEvent.create({
@@ -61,7 +63,7 @@ export class WebhooksService {
       },
     });
 
-    return event;
+    return { event, isDuplicate: false };
   }
 
   /**

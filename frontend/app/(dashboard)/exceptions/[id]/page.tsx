@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 
-export default function OldExceptionPage({ params }: { params: { id: string } }) {
-  redirect(`/exceptions?exception=${params.id}`);
+export default async function OldExceptionPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  redirect(`/exceptions?exception=${id}`);
 }
