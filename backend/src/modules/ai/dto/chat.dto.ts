@@ -17,12 +17,12 @@ import { Type } from 'class-transformer';
  */
 export class ChatMessageDto {
   @IsIn(['user', 'assistant'])
-  role: string;
+  role!: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(8000)
-  content: string;
+  content!: string;
 }
 
 export class ChatDto {
@@ -31,5 +31,5 @@ export class ChatDto {
   @ArrayMaxSize(40)
   @ValidateNested({ each: true })
   @Type(() => ChatMessageDto)
-  messages: ChatMessageDto[];
+  messages!: ChatMessageDto[];
 }

@@ -152,10 +152,12 @@ describe('Security (e2e)', () => {
     expect(response.status).toBe(429);
   });
 
-  it('5. Webhook freshness (stale created_at older than 5 mins are rejected)', async () => {
+  it('5. Webhook freshness (created_at older than the freshness window is rejected)', async () => {
     // Razorpay signs the raw body and sends no timestamp header, so staleness
     // is derived from the payload's `created_at` (seconds) after signature check.
-    const staleCreatedAt = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+    // The window is wide enough to admit Razorpay's ~24h retry schedule, so a
+    // stale fixture has to be older than that.
+    const staleCreatedAt = Math.floor(Date.now() / 1000) - 25 * 3600; // 25 hours ago
     const payload = JSON.stringify({ event: 'payment.failed', created_at: staleCreatedAt });
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET || 'test_secret';
     const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex');

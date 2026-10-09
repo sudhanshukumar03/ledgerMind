@@ -11,7 +11,8 @@ import { PolicyService } from './policy.service.js';
 import { RazorpayClient } from '../../integrations/razorpay/razorpay.client.js';
 import { CreateActionDto } from './dto/create-action.dto.js';
 import { ApproveActionDto, RejectActionDto } from './dto/approve-action.dto.js';
-import { ActionStatus, ActionType, ExceptionStatus, Role } from '@prisma/client';
+import { ActionStatus, ActionType, ExceptionStatus, Prisma, Role } from '@prisma/client';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class ActionsService {
@@ -94,19 +95,55 @@ export class ActionsService {
       }
     }
 
-    const action = await this.prisma.action.create({
-      data: {
-        merchantId: user.merchantId,
-        exceptionId: exception.id,
-        actionType: createActionDto.action_type,
-        status: policyResult.approvalRequired ? ActionStatus.PENDING_APPROVAL : ActionStatus.APPROVED,
-        parameters: createActionDto.parameters || {},
-        requestedById: user.id,
-        approvalRequired: policyResult.approvalRequired,
-        policyDecision: policyResult as any,
-        idempotencyKey: `${createActionDto.exception_id}-${createActionDto.action_type}-${JSON.stringify(createActionDto.parameters || {})}`,
-      },
-    });
+    const idempotencyKey = this.buildIdempotencyKey(
+      createActionDto.exception_id,
+      createActionDto.action_type,
+      createActionDto.parameters,
+    );
+
+    // A retried request (same exception + action type + parameters) must return
+    // the action that already exists rather than surfacing the unique-constraint
+    // violation as a 500 — and must not execute the action a second time.
+    const alreadyCreated = await this.prisma.action.findUnique({ where: { idempotencyKey } });
+    if (alreadyCreated) {
+      this.logger.log(
+        `Idempotent replay of action request; returning existing action ${alreadyCreated.id}`,
+      );
+      return this.mapAction(alreadyCreated);
+    }
+
+    let action;
+    try {
+      action = await this.prisma.action.create({
+        data: {
+          merchantId: user.merchantId,
+          exceptionId: exception.id,
+          actionType: createActionDto.action_type,
+          status: policyResult.approvalRequired ? ActionStatus.PENDING_APPROVAL : ActionStatus.APPROVED,
+          parameters: createActionDto.parameters || {},
+          requestedById: user.id,
+          approvalRequired: policyResult.approvalRequired,
+          policyDecision: policyResult as any,
+          idempotencyKey,
+        },
+      });
+    } catch (error) {
+      // Lost a race with a concurrent identical request: the other writer won
+      // the unique constraint, so adopt its action instead of failing.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const concurrent = await this.prisma.action.findUnique({ where: { idempotencyKey } });
+        if (concurrent) {
+          this.logger.warn(
+            `Concurrent duplicate action request; returning existing action ${concurrent.id}`,
+          );
+          return this.mapAction(concurrent);
+        }
+      }
+      throw error;
+    }
 
     await this.prisma.auditLog.create({
       data: {
@@ -126,6 +163,46 @@ export class ActionsService {
     }
 
     return this.mapAction(action);
+  }
+
+  /**
+   * Deterministic idempotency key for a proposed action.
+   *
+   * `JSON.stringify` on its own is key-order sensitive, so two identical
+   * requests that serialised their parameters in a different order produced
+   * different keys, slipped past the unique constraint, and created a second
+   * action — for a REFUND, a second money movement. Parameters are therefore
+   * sorted recursively before hashing, and the digest keeps the stored key
+   * bounded regardless of payload size.
+   */
+  private buildIdempotencyKey(
+    exceptionId: string,
+    actionType: ActionType,
+    parameters: unknown,
+  ): string {
+    const canonical = JSON.stringify(this.canonicalize(parameters ?? {}));
+    const digest = crypto
+      .createHash('sha256')
+      .update(`${exceptionId}|${actionType}|${canonical}`)
+      .digest('hex');
+    return `${exceptionId}:${actionType}:${digest.slice(0, 32)}`;
+  }
+
+  /** Recursively sorts object keys so serialisation is stable. */
+  private canonicalize(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.canonicalize(item));
+    }
+    if (value !== null && typeof value === 'object') {
+      const source = value as Record<string, unknown>;
+      return Object.keys(source)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, key) => {
+          acc[key] = this.canonicalize(source[key]);
+          return acc;
+        }, {});
+    }
+    return value;
   }
 
   private mapAction(action: any) {
@@ -431,7 +508,7 @@ export class ActionsService {
         refundId: refund.id,
         merchantId: action.merchantId,
         paymentId: params.payment_id,
-        amount: BigInt(refund.amount),
+        amount: BigInt(refund.amount ?? 0),
         status: 'PROCESSING',
       },
       update: {},

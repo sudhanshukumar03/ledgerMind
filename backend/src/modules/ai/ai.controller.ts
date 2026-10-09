@@ -6,7 +6,6 @@ import { ChatDto } from './dto/chat.dto.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
-import { Public } from '../../common/decorators/public.decorator.js';
 import { Role } from '@prisma/client';
 import { THROTTLE } from '../../common/throttler/throttler.config.js';
 
@@ -28,6 +27,9 @@ export class AiController {
     return this.aiService.chat(chatDto.messages, req.user.merchantId, req.user.userId);
   }
 
+  // Reveals the configured model and tool-surface size, which is useful
+  // reconnaissance for shaping a prompt-injection attempt — so it stays behind
+  // the controller's JwtAuthGuard. NOT @Public().
   @Get('config')
   getConfig() {
     return {

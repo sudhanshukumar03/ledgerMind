@@ -81,8 +81,25 @@ describe('Webhooks (e2e)', () => {
     expect(res.body).toEqual({ status: 'accepted' });
   });
 
-  it('rejects (HTTP 200, reason: stale_webhook) when payload created_at is >5min old', async () => {
-    const staleCreatedAt = Math.floor((Date.now() - 6 * 60 * 1000) / 1000);
+  // Razorpay retries an undelivered webhook for up to ~24h, so a delayed
+  // redelivery is legitimate and must still be accepted.
+  it('accepts a delayed redelivery (created_at an hour old)', async () => {
+    const delayedCreatedAt = Math.floor((Date.now() - 60 * 60 * 1000) / 1000);
+    const eventId = `evt_delayed_${Date.now()}`;
+    const payload = JSON.stringify({ event: 'payment.captured', event_id: eventId, created_at: delayedCreatedAt });
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/webhooks/razorpay')
+      .set('x-razorpay-signature', sign(payload, secret))
+      .send(payload)
+      .expect(200);
+    expect(res.body).toEqual({ status: 'accepted' });
+
+    const stored = await prisma.webhookEvent.findUnique({ where: { eventId } });
+    expect(stored?.processingStatus).toBe('PENDING');
+  });
+
+  it('rejects (HTTP 200, reason: stale_webhook) when payload created_at is older than the freshness window', async () => {
+    const staleCreatedAt = Math.floor((Date.now() - 25 * 60 * 60 * 1000) / 1000);
     // Unique id so a leftover row from a prior run can't shadow this as a duplicate.
     const eventId = `evt_stale_${Date.now()}`;
     const payload = JSON.stringify({ event: 'payment.captured', event_id: eventId, created_at: staleCreatedAt });
@@ -113,16 +130,39 @@ describe('Webhooks (e2e)', () => {
     expect(stored?.signatureVerified).toBe(true);
   });
 
-  it('marks a repeated event_id as IGNORED_DUPLICATE (idempotency via upsert)', async () => {
-    const payload = JSON.stringify({ event: 'payment.captured', event_id: 'evt_5' }); // same id as above
-    await request(app.getHttpServer())
+  it('treats a repeated event_id as a duplicate (idempotent — not re-enqueued)', async () => {
+    // Self-contained, unique id so the result doesn't depend on worker timing
+    // for an event created by an earlier test.
+    const eventId = `evt_dup_${Date.now()}`;
+    const payload = JSON.stringify({ event: 'payment.captured', event_id: eventId });
+    const sig = sign(payload, secret);
+
+    // First delivery is accepted and enqueued.
+    const first = await request(app.getHttpServer())
       .post('/api/v1/webhooks/razorpay')
-      .set('x-razorpay-timestamp', freshTimestamp())
-      .set('x-razorpay-signature', sign(payload, secret))
+      .set('x-razorpay-signature', sig)
       .send(payload)
       .expect(200);
+    expect(first.body).toEqual({ status: 'accepted' });
 
-    const stored = await prisma.webhookEvent.findUnique({ where: { eventId: 'evt_5' } });
-    expect(stored?.processingStatus).toBe('IGNORED_DUPLICATE');
+    // Second delivery of the same event_id is rejected as a duplicate before it
+    // can be re-enqueued. This HTTP contract is the deterministic idempotency
+    // guarantee, independent of whether the worker has run yet.
+    const second = await request(app.getHttpServer())
+      .post('/api/v1/webhooks/razorpay')
+      .set('x-razorpay-signature', sig)
+      .send(payload)
+      .expect(200);
+    expect(second.body).toEqual({ status: 'ignored', reason: 'duplicate_event' });
+
+    // Exactly one row exists for the event_id, in a valid terminal state. A
+    // duplicate seen before the worker runs is marked IGNORED_DUPLICATE; one
+    // seen after the worker already drove it to PROCESSED must NOT be
+    // downgraded (audit-tamper guard). Both are correct — the invariant is that
+    // the duplicate never re-opens the event, and the signature outcome stands.
+    const rows = await prisma.webhookEvent.findMany({ where: { eventId } });
+    expect(rows).toHaveLength(1);
+    expect(['IGNORED_DUPLICATE', 'PROCESSED']).toContain(rows[0].processingStatus);
+    expect(rows[0].signatureVerified).toBe(true);
   });
 });

@@ -89,9 +89,8 @@ export default function DashboardPage() {
 
   const latestRun = runsData?.[0] || runs[0];
   const matched = latestRun?.matchedCount ?? 0;
-  const unmatched = latestRun?.exceptionCount ?? 0;
-  const total = matched + unmatched;
-  const matchRate = total > 0 ? (matched / total) * 100 : 0;
+  const totalRecords = latestRun?.totalRecords ?? 0;
+  const matchRate = totalRecords > 0 ? (matched / totalRecords) * 100 : 0;
 
   return (
     <div className="flex flex-col min-h-full bg-bg relative">
@@ -172,11 +171,14 @@ export default function DashboardPage() {
             label="Total Volume (All Time)" 
             value={loading ? '—' : formatPaiseCompact(stats?.total_transaction_volume ?? '0')} 
             isLoading={loading}
-            sparklineData={runs.length > 0 ? runs.map(r => r.matchedCount).reverse() : undefined}
+            sparklineData={runs.length > 0 ? runs.map(r => {
+              const rate = r.totalRecords > 0 ? parseFloat(((r.matchedCount / r.totalRecords) * 100).toFixed(1)) : 0;
+              return rate;
+            }).reverse() : undefined}
           />
-          <StatCard 
-            label="Match Rate" 
-            value={loading ? '—' : total > 0 ? `${matchRate.toFixed(1)}%` : '—'} 
+          <StatCard
+            label="Match Rate"
+            value={loading ? '—' : totalRecords > 0 ? `${matchRate.toFixed(1)}%` : '—'} 
             trend={runs.length > 0 ? "Lifetime total" : undefined}
             isPositive={true}
             isLoading={loading}

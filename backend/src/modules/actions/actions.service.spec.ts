@@ -5,7 +5,7 @@ import { ActionsService } from './actions.service.js';
 import { PolicyService } from './policy.service.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import { RazorpayClient } from '../../integrations/razorpay/razorpay.client.js';
-import { ActionStatus, ActionType, Role } from '@prisma/client';
+import { ActionStatus, ActionType, Prisma, Role } from '@prisma/client';
 
 /**
  * ActionsService tests focus on the SECURITY INVARIANTS of the action engine:
@@ -113,6 +113,101 @@ describe('ActionsService (authorization invariants)', () => {
 
       expect(action.status).toBe(ActionStatus.APPROVED);
       expect(execSpy).toHaveBeenCalledWith('act-1', MERCHANT, adminUser.id);
+    });
+  });
+
+  /**
+   * A duplicate propose (client retry, double-click, at-least-once queue
+   * redelivery) must be absorbed: return the action that already exists rather
+   * than letting the idempotency_key unique violation escape as a 500 — and
+   * critically, never execute the action a second time.
+   */
+  describe('createAction (idempotency)', () => {
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue(adminUser);
+      prisma.exception.findUnique.mockResolvedValue({ id: 'exc-1', merchantId: MERCHANT });
+      policy.evaluate.mockReturnValue({ allowed: true, approvalRequired: false });
+    });
+
+    it('returns the existing action on a replay, creating and executing nothing', async () => {
+      const existing = {
+        id: 'act-existing',
+        merchantId: MERCHANT,
+        status: ActionStatus.COMPLETED,
+        parameters: {},
+      };
+      prisma.action.findUnique.mockResolvedValue(existing);
+      const execSpy = jest.spyOn(service, 'executeAction').mockResolvedValue(undefined as any);
+
+      const out = await service.createAction(adminUser.id, proposeDto() as any);
+
+      expect(out.id).toBe('act-existing');
+      expect(prisma.action.create).not.toHaveBeenCalled();
+      expect(execSpy).not.toHaveBeenCalled();
+      // No second ACTION_PROPOSED entry for a request that created nothing.
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('adopts the winner of a concurrent duplicate instead of surfacing a 500', async () => {
+      const winner = {
+        id: 'act-winner',
+        merchantId: MERCHANT,
+        status: ActionStatus.APPROVED,
+        parameters: {},
+      };
+      // Pre-check misses (both requests saw no row); the post-P2002 read finds
+      // the row the other writer committed.
+      prisma.action.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(winner);
+      prisma.action.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+      const execSpy = jest.spyOn(service, 'executeAction').mockResolvedValue(undefined as any);
+
+      const out = await service.createAction(adminUser.id, proposeDto() as any);
+
+      expect(out.id).toBe('act-winner');
+      expect(execSpy).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a create failure that is not a duplicate-key violation', async () => {
+      prisma.action.findUnique.mockResolvedValue(null);
+      prisma.action.create.mockRejectedValue(new Error('connection reset'));
+
+      await expect(service.createAction(adminUser.id, proposeDto() as any)).rejects.toThrow(
+        'connection reset',
+      );
+    });
+
+    it('derives the same idempotency key regardless of parameter key order', async () => {
+      policy.evaluate.mockReturnValue({ allowed: true, approvalRequired: true });
+      prisma.action.findUnique.mockResolvedValue(null);
+
+      await service.createAction(
+        adminUser.id,
+        proposeDto({ parameters: { amount: 500, reason: 'dup' } }) as any,
+      );
+      await service.createAction(
+        adminUser.id,
+        proposeDto({ parameters: { reason: 'dup', amount: 500 } }) as any,
+      );
+
+      const keys = prisma.action.create.mock.calls.map((call: any) => call[0].data.idempotencyKey);
+      expect(keys).toHaveLength(2);
+      expect(keys[0]).toBe(keys[1]);
+    });
+
+    it('derives different keys for different parameters', async () => {
+      policy.evaluate.mockReturnValue({ allowed: true, approvalRequired: true });
+      prisma.action.findUnique.mockResolvedValue(null);
+
+      await service.createAction(adminUser.id, proposeDto({ parameters: { amount: 500 } }) as any);
+      await service.createAction(adminUser.id, proposeDto({ parameters: { amount: 600 } }) as any);
+
+      const keys = prisma.action.create.mock.calls.map((call: any) => call[0].data.idempotencyKey);
+      expect(keys[0]).not.toBe(keys[1]);
     });
   });
 

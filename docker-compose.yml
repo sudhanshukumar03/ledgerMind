@@ -22,7 +22,10 @@ services:
     container_name: ledgermind-redis
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      # Host-published on 6380 (not 6379) so a locally-run backend can reach it
+      # without colliding with any other project holding host 6379. Inside the
+      # compose network services still connect to `redis:6379`.
+      - "127.0.0.1:6380:6379"
     command: ["redis-server", "--appendonly", "no", "--save", "", "--requirepass", "${REDIS_PASSWORD:-krama_redis_secret}"]
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-krama_redis_secret}", "ping"]
