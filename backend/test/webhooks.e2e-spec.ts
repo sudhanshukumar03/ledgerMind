@@ -81,8 +81,25 @@ describe('Webhooks (e2e)', () => {
     expect(res.body).toEqual({ status: 'accepted' });
   });
 
-  it('rejects (HTTP 200, reason: stale_webhook) when payload created_at is >5min old', async () => {
-    const staleCreatedAt = Math.floor((Date.now() - 6 * 60 * 1000) / 1000);
+  // Razorpay retries an undelivered webhook for up to ~24h, so a delayed
+  // redelivery is legitimate and must still be accepted.
+  it('accepts a delayed redelivery (created_at an hour old)', async () => {
+    const delayedCreatedAt = Math.floor((Date.now() - 60 * 60 * 1000) / 1000);
+    const eventId = `evt_delayed_${Date.now()}`;
+    const payload = JSON.stringify({ event: 'payment.captured', event_id: eventId, created_at: delayedCreatedAt });
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/webhooks/razorpay')
+      .set('x-razorpay-signature', sign(payload, secret))
+      .send(payload)
+      .expect(200);
+    expect(res.body).toEqual({ status: 'accepted' });
+
+    const stored = await prisma.webhookEvent.findUnique({ where: { eventId } });
+    expect(stored?.processingStatus).toBe('PENDING');
+  });
+
+  it('rejects (HTTP 200, reason: stale_webhook) when payload created_at is older than the freshness window', async () => {
+    const staleCreatedAt = Math.floor((Date.now() - 25 * 60 * 60 * 1000) / 1000);
     // Unique id so a leftover row from a prior run can't shadow this as a duplicate.
     const eventId = `evt_stale_${Date.now()}`;
     const payload = JSON.stringify({ event: 'payment.captured', event_id: eventId, created_at: staleCreatedAt });

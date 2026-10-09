@@ -40,34 +40,55 @@ export class WebhookProcessor extends WorkerHost {
       return;
     }
 
-    // Mark as PROCESSING
-    await this.prisma.webhookEvent.update({
-      where: { id: event.id },
+    // Mark as PROCESSING atomically — only succeed if still PENDING.
+    // This prevents two workers from processing the same event.
+    const markResult = await this.prisma.webhookEvent.updateMany({
+      where: { id: event.id, processingStatus: WebhookProcessingStatus.PENDING },
       data: { processingStatus: WebhookProcessingStatus.PROCESSING },
     });
+
+    if (markResult.count === 0) {
+      this.logger.warn(`Skipping webhook ${event.id} — already being processed`);
+      return;
+    }
 
     try {
       await this.handleEvent(event.eventType, event.payload);
 
-      // Resolve the owning merchant from the affected entity so the event can
-      // be attributed for tenant-scoped listing and reconciliation.
+      // Resolve the owning merchant from the affected entity
       const merchantId = await this.extractMerchantId(event.payload);
 
-      // Mark as PROCESSED (and attribute to the merchant when known)
+      // Reconciliation failures must not mark the webhook FAILED — the event
+      // itself was handled correctly and must not be redelivered. But the
+      // failure must not vanish either: it is recorded on the event row below
+      // so operators can see it, instead of existing only as a log line.
+      let reconciliationError: string | null = null;
+      if (merchantId) {
+        try {
+          await this.reconciliationService.runReconciliation({ merchantId });
+        } catch (reconErr: any) {
+          const message = reconErr?.message ?? String(reconErr);
+          reconciliationError = `Reconciliation failed: ${message}`;
+          this.logger.error(
+            `Reconciliation failed after webhook ${event.id}: ${message}`,
+            reconErr?.stack,
+          );
+        }
+      } else {
+        this.logger.warn('No merchantId found in webhook payload; skipping reconciliation.');
+      }
+
+      // Single terminal write: the event only becomes PROCESSED once the whole
+      // unit of work (handler + reconciliation attempt) has run, carrying any
+      // reconciliation error with it.
       await this.prisma.webhookEvent.update({
         where: { id: event.id },
         data: {
           processingStatus: WebhookProcessingStatus.PROCESSED,
+          processingError: reconciliationError,
           ...(merchantId ? { merchantId } : {}),
         },
       });
-
-      // Trigger reconciliation for the affected merchant
-      if (merchantId) {
-        await this.reconciliationService.runReconciliation({ merchantId });
-      } else {
-        this.logger.warn('No merchantId found in webhook payload; skipping reconciliation.');
-      }
     } catch (error: any) {
       this.logger.error(`Failed to process webhook ${event.id}: ${error.message}`);
       await this.prisma.webhookEvent.update({

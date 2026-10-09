@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 import { Prisma, Severity } from '@prisma/client';
 import { z } from 'zod';
@@ -28,6 +28,14 @@ export interface AiProposal {
   reason: string;
   requires_approval: true;
 }
+
+// ─── Chat turn limits ──────────────────────────────────────────────────────
+// Kept in sync with `ChatDto` (dto/chat.dto.ts), which enforces the same
+// bounds on the HTTP request body. `system` and `tool` are deliberately absent
+// from the allow-list: the trusted SYSTEM_PROMPT is prepended by the service.
+const CHAT_ALLOWED_ROLES = ['user', 'assistant'] as const;
+const CHAT_MAX_MESSAGES = 40;
+const CHAT_MAX_CONTENT_CHARS = 8000;
 
 // ─── Tool definitions (per docs/specifications/ai-agent.md) ────────────────
 // All tools are READ-ONLY. The AI is NOT a source of financial truth and must
@@ -217,9 +225,9 @@ export class AiService {
       case 'get_customer_history': {
         const limit = Math.min((args.limit as number) ?? 10, 10);
         const [orders, payments] = await Promise.all([
-          this.prisma.order.findMany({ where: { merchantId, customerId: args.customer_id }, take: limit, orderBy: { createdAt: 'desc' } }),
+          this.prisma.order.findMany({ where: { merchantId, customerId: args.customer_id as string }, take: limit, orderBy: { createdAt: 'desc' } }),
           this.prisma.payment.findMany({ 
-            where: { merchantId, order: { customerId: args.customer_id } }, 
+            where: { merchantId, order: { customerId: args.customer_id as string } }, 
             take: limit, 
             orderBy: { createdAt: 'desc' } 
           }),
@@ -444,9 +452,11 @@ export class AiService {
   }
 
   async chat(userMessages: { role: string; content: string }[], merchantId: string, userId?: string) {
+    const sanitizedMessages = this.sanitizeChatMessages(userMessages);
+
     const messages: { role: string; content: string }[] = [
       { role: 'system', content: SYSTEM_PROMPT },
-      ...userMessages,
+      ...sanitizedMessages,
     ];
 
     const { finalMessage, toolCallLog } = await this.runToolLoop(messages, merchantId);
@@ -455,7 +465,7 @@ export class AiService {
 
     // Audit any actionable proposals the AI surfaced in this turn.
     if (proposals.length > 0) {
-      const lastUser = [...userMessages].reverse().find((m) => m.role === 'user');
+      const lastUser = [...sanitizedMessages].reverse().find((m) => m.role === 'user');
       await this.writeAiAudit(
         merchantId,
         userId,
@@ -479,8 +489,54 @@ export class AiService {
     };
   }
 
-  // ─── Core tool loop ───────────────────────────────────────────────────────
+  /**
+   * Enforces the chat-turn contract at the service boundary.
+   *
+   * `ChatDto` applies the same limits to the HTTP request body; repeating them
+   * here means every caller of `chat()` gets the guarantee, not just the
+   * controller. The critical invariant is the role allow-list: the loop
+   * prepends a trusted `system` prompt, so a client-supplied `system` (or
+   * `tool`) turn must never reach the model alongside it.
+   */
+  private sanitizeChatMessages(
+    userMessages: { role: string; content: string }[],
+  ): { role: string; content: string }[] {
+    if (!Array.isArray(userMessages) || userMessages.length === 0) {
+      throw new BadRequestException('messages must be a non-empty array');
+    }
+    if (userMessages.length > CHAT_MAX_MESSAGES) {
+      throw new BadRequestException(
+        `messages must contain at most ${CHAT_MAX_MESSAGES} entries`,
+      );
+    }
 
+    return userMessages.map((message, index) => {
+      const role = message?.role;
+      if (!CHAT_ALLOWED_ROLES.includes(role as (typeof CHAT_ALLOWED_ROLES)[number])) {
+        // Reject rather than drop: a caller attempting to smuggle in a `system`
+        // turn must get an error, not a silently rewritten conversation.
+        throw new BadRequestException(
+          `messages[${index}].role must be one of: ${CHAT_ALLOWED_ROLES.join(', ')}`,
+        );
+      }
+
+      const content = message?.content;
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        throw new BadRequestException(
+          `messages[${index}].content must be a non-empty string`,
+        );
+      }
+      if (content.length > CHAT_MAX_CONTENT_CHARS) {
+        throw new BadRequestException(
+          `messages[${index}].content exceeds the ${CHAT_MAX_CONTENT_CHARS} character limit`,
+        );
+      }
+
+      return { role, content };
+    });
+  }
+
+  // ─── Core tool loop ───────────────────────────────────────────────────────
   private async runToolLoop(
     userMessages: { role: string; content?: string }[],
     merchantId: string,
