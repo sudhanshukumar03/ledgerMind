@@ -78,18 +78,33 @@ jobs:
 
       - name: Wait for services
         run: |
+          pg_ready=0
           for i in $(seq 1 30); do
-            if docker exec ledgermind-postgres pg_isready -U postgres 2>/dev/null; then break; fi
+            if docker exec ledgermind-postgres pg_isready -U postgres 2>/dev/null; then
+              pg_ready=1
+              break
+            fi
             sleep 1
           done
 
+          if [ "$pg_ready" -ne 1 ]; then
+            docker logs ledgermind-postgres
+            exit 1
+          fi
+
+          redis_ready=0
           for i in $(seq 1 30); do
-            if docker exec ledgermind-redis redis-cli ping 2>/dev/null | grep -q PONG; then break; fi
+            if docker exec ledgermind-redis redis-cli ping 2>/dev/null | grep -q PONG; then
+              redis_ready=1
+              break
+            fi
             sleep 1
           done
 
-          docker exec ledgermind-postgres pg_isready -U postgres
-          docker exec ledgermind-redis redis-cli ping
+          if [ "$redis_ready" -ne 1 ]; then
+            docker logs ledgermind-redis
+            exit 1
+          fi
 
       - run: npm ci
       - run: npx prisma generate
