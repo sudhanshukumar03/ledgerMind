@@ -42,29 +42,11 @@ jobs:
     defaults:
       run:
         working-directory: backend
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: ledgermind_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s --health-timeout 5s --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s --health-timeout 5s --health-retries 5
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ledgermind_test
       REDIS_HOST: localhost
       REDIS_PORT: '6379'
       GROQ_API_KEY: test_key
-      # >=32 chars — see note in backend-unit. Throwaway CI value, not a secret.
       JWT_SECRET: ci_test_jwt_secret_minimum_32_chars_long
       RAZORPAY_WEBHOOK_SECRET: test_secret
       NODE_ENV: test
@@ -75,6 +57,49 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
+
+      # Docker Hub's unauthenticated pull rate limit is too tight for the
+      # services: block, which pulls images outside of any authenticated
+      # context. Login first, then start containers manually.
+      - name: Authenticate with Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Start PostgreSQL and Redis
+        run: |
+          docker pull postgres:16-alpine
+          docker pull redis:7-alpine
+
+          docker run -d \
+            --name ledgermind-postgres \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=ledgermind_test \
+            -p 5432:5432 \
+            postgres:16-alpine
+
+          docker run -d \
+            --name ledgermind-redis \
+            -p 6379:6379 \
+            redis:7-alpine
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec ledgermind-postgres pg_isready -U postgres 2>/dev/null; then break; fi
+            sleep 1
+          done
+
+          for i in $(seq 1 30); do
+            if docker exec ledgermind-redis redis-cli ping 2>/dev/null | grep -q PONG; then break; fi
+            sleep 1
+          done
+
+          docker exec ledgermind-postgres pg_isready -U postgres
+          docker exec ledgermind-redis redis-cli ping
+
       - run: npm ci
       - run: npx prisma generate
       # No migrations dir — push the schema straight onto the fresh test DB.
@@ -83,6 +108,11 @@ jobs:
       # don't tear down; without it Jest hangs after the last test and the job
       # would run until timeout. --runInBand for the same OOM reason as unit.
       - run: npm run test:e2e -- --runInBand --forceExit
+
+      - name: Cleanup containers
+        if: always()
+        run: |
+          docker rm -f ledgermind-postgres ledgermind-redis 2>/dev/null || true
 
   frontend-build:
     name: Frontend build
