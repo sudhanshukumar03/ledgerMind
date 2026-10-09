@@ -155,14 +155,15 @@ describe('Webhooks (e2e)', () => {
       .expect(200);
     expect(second.body).toEqual({ status: 'ignored', reason: 'duplicate_event' });
 
-    // Exactly one row exists for the event_id, in a valid terminal state. A
-    // duplicate seen before the worker runs is marked IGNORED_DUPLICATE; one
-    // seen after the worker already drove it to PROCESSED must NOT be
-    // downgraded (audit-tamper guard). Both are correct — the invariant is that
-    // the duplicate never re-opens the event, and the signature outcome stands.
+    // Exactly one row exists for the event_id, and duplicate delivery never
+    // re-opens it. Depending on worker timing the row may be:
+    // - IGNORED_DUPLICATE (duplicate handled before worker starts)
+    // - PROCESSING (worker picked it while this test is asserting)
+    // - PROCESSED (worker completed before assertion)
+    // The signature outcome must always remain verified.
     const rows = await prisma.webhookEvent.findMany({ where: { eventId } });
     expect(rows).toHaveLength(1);
-    expect(['IGNORED_DUPLICATE', 'PROCESSED']).toContain(rows[0].processingStatus);
+    expect(['IGNORED_DUPLICATE', 'PROCESSING', 'PROCESSED']).toContain(rows[0].processingStatus);
     expect(rows[0].signatureVerified).toBe(true);
   });
 });
