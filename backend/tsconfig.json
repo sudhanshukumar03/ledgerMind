@@ -9,6 +9,7 @@
     "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
     "target": "ES2022",
+    "rootDir": ".",
     "sourceMap": true,
     "outDir": "./dist",
     "incremental": true,
@@ -18,6 +19,7 @@
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
     "types": ["jest", "node"]
   }
 }

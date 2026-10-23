@@ -30,6 +30,9 @@ export interface Exception {
   differenceAmount?: string;
   customerImpact?: string;
   description: string;
+  primaryEntityType?: string;
+  primaryEntityId?: string;
+  eligiblePayments?: { id: string; paymentId: string; remainingAmount: string }[];
   resolutionNote?: string;
   createdAt: string;
   resolvedAt?: string;
@@ -53,6 +56,8 @@ export interface ReconciliationRun {
   status: string;
   startedAt: string;
   completedAt?: string;
+  capturedPayments?: number;
+  matchedPayments?: number;
   totalRecords: number;
   matchedCount: number;
   exceptionCount: number;
@@ -61,13 +66,16 @@ export interface ReconciliationRun {
 export interface Action {
   id: string;
   type: 'REFUND' | 'CREATE_PAYMENT_LINK' | 'MARK_REVIEWED' | 'ESCALATE';
-  status: 'PROPOSED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTING' | 'COMPLETED' | 'FAILED';
+  status: 'PROPOSED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTING' | 'OUTCOME_UNKNOWN' | 'COMPLETED' | 'FAILED';
   amount?: string;
   reason: string;
   exceptionId: string;
   idempotencyKey: string;
   createdAt: string;
   executionResult?: any;
+  requestedById?: string;
+  requiredApprovals?: number;
+  approvals?: { userId: string }[];
 }
 
 export interface ProposeActionPayload {

@@ -1,15 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { Action, Exception, exceptionsApi, actionsApi } from '../../lib/api-client';
+import {
+  Action,
+  Exception,
+  exceptionsApi,
+  actionsApi,
+} from '../../lib/api-client';
 import { C } from '../../lib/tokens';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Amount } from '../ui/Amount';
-import { Loader2, AlertTriangle, ShieldAlert, X, AlertCircle } from 'lucide-react';
+import {
+  Loader2,
+  AlertTriangle,
+  ShieldAlert,
+  X,
+  AlertCircle,
+} from 'lucide-react';
 import { useAuth } from '../../app/providers';
 
 interface ActionModalProps {
   action: Action;
   onClose: () => void;
-  onComplete: (msg: { type: 'success' | 'error', text: string }) => void;
+  onComplete: (msg: { type: 'success' | 'error'; text: string }) => void;
 }
 
 export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
@@ -18,30 +29,62 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
   const [excLoading, setExcLoading] = useState(true);
   const [excFailed, setExcFailed] = useState(false);
   const [reason, setReason] = useState(action.reason || '');
-  const [submitting, setSubmitting] = useState<'approve' | 'reject' | null>(null);
+  const [submitting, setSubmitting] = useState<'approve' | 'reject' | null>(
+    null,
+  );
   const [inlineError, setInlineError] = useState<string | null>(null);
 
   useEffect(() => {
     setExcLoading(true);
     setExcFailed(false);
-    exceptionsApi.get(action.exceptionId)
-      .then(r => setExc(r.data))
+    exceptionsApi
+      .get(action.exceptionId)
+      .then((r) => setExc(r.data))
       .catch(() => setExcFailed(true))
       .finally(() => setExcLoading(false));
   }, [action.exceptionId]);
 
-  const canApprove = user?.role === 'ADMIN';
+  const canApprove =
+    user?.role === 'ADMIN' &&
+    action.requestedById !== user?.id &&
+    !action.approvals?.some((a) => a.userId === user?.id);
+  const [providerId, setProviderId] = useState('');
+  const unknown =
+    action.status === 'OUTCOME_UNKNOWN' ||
+    (action.type === 'CREATE_PAYMENT_LINK' && action.status === 'COMPLETED');
+  const recover = async () => {
+    if (user?.role !== 'ADMIN' || !providerId.trim()) return;
+    setSubmitting('approve');
+    setInlineError(null);
+    try {
+      await actionsApi.recover(action.id, providerId.trim());
+      onComplete({
+        type: 'success',
+        text: 'Provider outcome verified and recorded',
+      });
+    } catch (e: any) {
+      setInlineError(
+        e.response?.data?.message ?? 'Provider verification failed',
+      );
+      setSubmitting(null);
+    }
+  };
 
   const handleApprove = async () => {
     if (!canApprove || !reason.trim() || submitting) return;
     setSubmitting('approve');
     setInlineError(null);
     try {
-      await actionsApi.approve(action.id, reason);
-      onComplete({ type: 'success', text: 'Action approved and queued for execution' });
+      const result = await actionsApi.approve(action.id, reason);
+      onComplete({
+        type: 'success',
+        text: `Approval recorded. Action is ${result.data.status.replace(/_/g, ' ').toLowerCase()}.`,
+      });
     } catch (e: any) {
       // Stay open — show error inline
-      setInlineError(e.response?.data?.message ?? 'Failed to approve. Please try again.');
+      setInlineError(
+        e.response?.data?.message ?? 'Failed to approve. Please try again.',
+      );
       setSubmitting(null);
     }
   };
@@ -55,7 +98,9 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
       onComplete({ type: 'success', text: 'Action rejected' });
     } catch (e: any) {
       // Stay open — show error inline
-      setInlineError(e.response?.data?.message ?? 'Failed to reject. Please try again.');
+      setInlineError(
+        e.response?.data?.message ?? 'Failed to reject. Please try again.',
+      );
       setSubmitting(null);
     }
   };
@@ -70,62 +115,124 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
           className="bg-bg w-full max-w-4xl rounded-xl shadow-2xl z-50 flex flex-col max-h-[90vh] overflow-hidden animate-slide-up border"
           style={{ borderColor: C.border }}
         >
-          
           {/* Header */}
-          <div className="px-6 py-4 border-b flex items-center justify-between bg-surface" style={{ borderColor: C.border }}>
+          <div
+            className="px-6 py-4 border-b flex items-center justify-between bg-surface"
+            style={{ borderColor: C.border }}
+          >
             <div className="flex items-center gap-3">
               <ShieldAlert className="w-5 h-5" style={{ color: C.warning }} />
-              <h2 id="action-modal-title" className="text-[16px] font-bold" style={{ color: C.textPrimary }}>Review Action: {(action.type || (action as any).actionType || 'UNKNOWN').replace(/_/g, ' ')}</h2>
+              <h2
+                id="action-modal-title"
+                className="text-[16px] font-bold"
+                style={{ color: C.textPrimary }}
+              >
+                Review Action:{' '}
+                {(
+                  action.type ||
+                  (action as any).actionType ||
+                  'UNKNOWN'
+                ).replace(/_/g, ' ')}
+              </h2>
             </div>
-            <button onClick={onClose} disabled={!!submitting} className="p-1 rounded-md transition-colors hover-bg-muted disabled:opacity-50">
+            <button
+              onClick={onClose}
+              disabled={!!submitting}
+              className="p-1 rounded-md transition-colors hover-bg-muted disabled:opacity-50"
+            >
               <X className="w-5 h-5 text-gray-500" />
             </button>
           </div>
 
           <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
             {/* Left Column: Current Exception State */}
-            <div className="md:w-1/2 p-6 overflow-y-auto border-b md:border-b-0 md:border-r" style={{ borderColor: C.border, backgroundColor: '#F8FAFC' }}>
+            <div
+              className="md:w-1/2 p-6 overflow-y-auto border-b md:border-b-0 md:border-r"
+              style={{ borderColor: C.border, backgroundColor: '#F8FAFC' }}
+            >
               {excLoading ? (
                 <div className="flex flex-col items-center justify-center h-40">
-                  <Loader2 className="w-6 h-6 animate-spin mb-2" style={{ color: C.textMuted }} />
-                  <span className="text-[12px]" style={{ color: C.textMuted }}>Loading exception state…</span>
+                  <Loader2
+                    className="w-6 h-6 animate-spin mb-2"
+                    style={{ color: C.textMuted }}
+                  />
+                  <span className="text-[12px]" style={{ color: C.textMuted }}>
+                    Loading exception state…
+                  </span>
                 </div>
               ) : excFailed || !exc ? (
                 <div className="flex flex-col items-center justify-center h-40 gap-2">
-                  <AlertTriangle className="w-6 h-6" style={{ color: C.textMuted }} />
-                  <span className="text-[12px]" style={{ color: C.textMuted }}>Unable to load current state</span>
+                  <AlertTriangle
+                    className="w-6 h-6"
+                    style={{ color: C.textMuted }}
+                  />
+                  <span className="text-[12px]" style={{ color: C.textMuted }}>
+                    Unable to load current state
+                  </span>
                 </div>
               ) : (
                 <div className="space-y-5">
-                  <h3 className="text-[12px] font-bold uppercase tracking-wider" style={{ color: C.textMuted }}>
+                  <h3
+                    className="text-[12px] font-bold uppercase tracking-wider"
+                    style={{ color: C.textMuted }}
+                  >
                     Current state · {exc.exceptionId}
                   </h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>Status</div>
+                      <div
+                        className="text-[11px] font-semibold uppercase tracking-wider mb-1"
+                        style={{ color: C.textMuted }}
+                      >
+                        Status
+                      </div>
                       <StatusBadge status={exc.status as any} />
                     </div>
                     <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>Severity</div>
+                      <div
+                        className="text-[11px] font-semibold uppercase tracking-wider mb-1"
+                        style={{ color: C.textMuted }}
+                      >
+                        Severity
+                      </div>
                       <StatusBadge severity={exc.severity as any} />
                     </div>
                   </div>
-                  <div className="rounded-lg border p-4 space-y-3" style={{ backgroundColor: C.surface, borderColor: C.border }}>
+                  <div
+                    className="rounded-lg border p-4 space-y-3"
+                    style={{
+                      backgroundColor: C.surface,
+                      borderColor: C.border,
+                    }}
+                  >
                     <dl className="space-y-3 text-[13px]">
                       <div className="flex justify-between gap-2">
                         <dt style={{ color: C.textMuted }}>Exception Type</dt>
-                        <dd className="font-medium" style={{ color: C.textPrimary }}>{exc.type.replace(/_/g, ' ')}</dd>
+                        <dd
+                          className="font-medium"
+                          style={{ color: C.textPrimary }}
+                        >
+                          {exc.type.replace(/_/g, ' ')}
+                        </dd>
                       </div>
                       <div className="flex justify-between gap-2">
-                        <dt style={{ color: C.textMuted }}>Financial Exposure</dt>
-                        <dd className="font-semibold tabular-nums text-right" style={{ color: C.textPrimary }}>
+                        <dt style={{ color: C.textMuted }}>
+                          Financial Exposure
+                        </dt>
+                        <dd
+                          className="font-semibold tabular-nums text-right"
+                          style={{ color: C.textPrimary }}
+                        >
                           <Amount value={exc.financialImpact} />
                         </dd>
                       </div>
                       {exc.differenceAmount && (
                         <div className="flex justify-between gap-2">
                           <dt style={{ color: C.textMuted }}>Difference</dt>
-                          <dd className="font-medium tabular-nums text-right" style={{ color: C.textPrimary }}>
+                          <dd
+                            className="font-medium tabular-nums text-right"
+                            style={{ color: C.textPrimary }}
+                          >
                             <Amount value={exc.differenceAmount} />
                           </dd>
                         </div>
@@ -137,15 +244,28 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
             </div>
 
             {/* Right Column: Proposed Action */}
-            <div className="md:w-1/2 p-6 flex flex-col overflow-y-auto" style={{ backgroundColor: C.surface }}>
+            <div
+              className="md:w-1/2 p-6 flex flex-col overflow-y-auto"
+              style={{ backgroundColor: C.surface }}
+            >
               <div
                 className="mb-5 p-4 rounded-lg flex gap-3 border shrink-0"
-                style={{ backgroundColor: C.warningTint, borderColor: `${C.warning}40`, color: C.warning }}
+                style={{
+                  backgroundColor: C.warningTint,
+                  borderColor: `color-mix(in srgb, ${C.warning} 25%, transparent)`,
+                  color: C.warning,
+                }}
               >
                 <ShieldAlert className="w-5 h-5 shrink-0 mt-px" />
                 <div className="text-[13px]">
-                  <strong className="font-bold block mb-1">Human Approval Required</strong>
-                  AI recommendations must be reviewed by a human before execution.
+                  <strong className="font-bold block mb-1">
+                    {unknown
+                      ? 'Provider Verification'
+                      : 'Human Approval Required'}
+                  </strong>
+                  {unknown
+                    ? 'An admin can check the existing operation and record its current provider status.'
+                    : 'AI recommendations must be reviewed by a human before execution.'}
                 </div>
               </div>
 
@@ -153,20 +273,41 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
                 {/* Proposed action — tinted */}
                 <div
                   className="rounded-lg border p-4 space-y-3"
-                  style={{ backgroundColor: C.primaryTint, borderColor: `${C.primary}20` }}
+                  style={{
+                    backgroundColor: C.primaryTint,
+                    borderColor: `color-mix(in srgb, ${C.primary} 13%, transparent)`,
+                  }}
                 >
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.primary }}>
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-wider mb-1"
+                      style={{ color: C.primary }}
+                    >
                       Proposed Action
                     </div>
-                    <div className="text-[15px] font-bold" style={{ color: C.textPrimary }}>
-                      {(action.type || (action as any).actionType || 'UNKNOWN').replace(/_/g, ' ')}
+                    <div
+                      className="text-[15px] font-bold"
+                      style={{ color: C.textPrimary }}
+                    >
+                      {(
+                        action.type ||
+                        (action as any).actionType ||
+                        'UNKNOWN'
+                      ).replace(/_/g, ' ')}
                     </div>
                   </div>
                   {action.amount && (
                     <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.primary }}>Amount</div>
-                      <div className="text-[14px] font-semibold tabular-nums" style={{ color: C.textPrimary }}>
+                      <div
+                        className="text-[11px] font-semibold uppercase tracking-wider mb-1"
+                        style={{ color: C.primary }}
+                      >
+                        Amount
+                      </div>
+                      <div
+                        className="text-[14px] font-semibold tabular-nums"
+                        style={{ color: C.textPrimary }}
+                      >
                         <Amount value={action.amount} />
                       </div>
                     </div>
@@ -174,10 +315,19 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
                 </div>
 
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>Original Reason</div>
+                  <div
+                    className="text-[11px] font-semibold uppercase tracking-wider mb-1"
+                    style={{ color: C.textMuted }}
+                  >
+                    Original Reason
+                  </div>
                   <div
                     className="text-[13px] p-3 rounded-lg border font-mono"
-                    style={{ color: C.textSecondary, borderColor: C.border, backgroundColor: C.bg }}
+                    style={{
+                      color: C.textSecondary,
+                      borderColor: C.border,
+                      backgroundColor: C.bg,
+                    }}
                   >
                     {action.reason}
                   </div>
@@ -208,7 +358,11 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
                   role="alert"
                   aria-live="polite"
                   className="mt-4 flex items-start gap-2 p-3 rounded-lg border text-[13px]"
-                  style={{ backgroundColor: C.criticalTint, borderColor: `${C.critical}40`, color: C.critical }}
+                  style={{
+                    backgroundColor: C.criticalTint,
+                    borderColor: `color-mix(in srgb, ${C.critical} 25%, transparent)`,
+                    color: C.critical,
+                  }}
                 >
                   <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
                   <span>{inlineError}</span>
@@ -216,30 +370,69 @@ export function ActionModal({ action, onClose, onComplete }: ActionModalProps) {
               )}
 
               {/* Action buttons */}
-              <div className="mt-6 flex gap-3 pt-4 border-t shrink-0" style={{ borderColor: C.border }}>
+              <div
+                className="mt-6 flex gap-3 pt-4 border-t shrink-0"
+                style={{ borderColor: C.border }}
+              >
                 <button
                   onClick={handleReject}
-                  disabled={!!submitting || !reason.trim()}
+                  disabled={unknown || !!submitting || !reason.trim()}
                   className="flex-1 btn-danger py-2.5"
                 >
-                  {submitting === 'reject'
-                    ? <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                    : 'Reject Action'}
+                  {submitting === 'reject' ? (
+                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                  ) : (
+                    'Reject Action'
+                  )}
                 </button>
-                {canApprove ? (
+                {unknown ? (
+                  <div className="flex-1 space-y-2">
+                    <p className="text-sm">
+                      {action.status === 'OUTCOME_UNKNOWN'
+                        ? 'Provider outcome is uncertain. Verify the existing operation before creating another.'
+                        : 'Refresh this payment link. Confirmed cancellation or expiry allows a replacement.'}
+                    </p>
+                    {user?.role === 'ADMIN' && (
+                      <>
+                        <input
+                          aria-label="Provider operation ID"
+                          value={providerId}
+                          onChange={(e) => setProviderId(e.target.value)}
+                          className="border p-2 rounded w-full"
+                        />
+                        <button
+                          className="btn-primary"
+                          onClick={recover}
+                          disabled={!providerId.trim() || !!submitting}
+                        >
+                          Verify Provider Outcome
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ) : canApprove ? (
                   <button
                     onClick={handleApprove}
                     disabled={!!submitting || !reason.trim()}
                     className="flex-1 btn-primary py-2.5"
-                    style={{ backgroundColor: C.success, borderColor: C.success }}
+                    style={{
+                      backgroundColor: C.success,
+                      borderColor: C.success,
+                    }}
                   >
-                    {submitting === 'approve'
-                      ? <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                      : 'Approve & Execute'}
+                    {submitting === 'approve' ? (
+                      <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                    ) : (
+                      'Record Approval'
+                    )}
                   </button>
                 ) : (
-                  <div className="flex-1 flex items-center justify-center text-[12px] text-center" style={{ color: C.textMuted }}>
-                    Only ADMIN can approve. Action is awaiting admin approval.
+                  <div
+                    className="flex-1 flex items-center justify-center text-[12px] text-center"
+                    style={{ color: C.textMuted }}
+                  >
+                    Approval requires a distinct ADMIN who has not already
+                    approved.
                   </div>
                 )}
               </div>

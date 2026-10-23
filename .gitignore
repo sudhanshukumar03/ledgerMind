@@ -59,12 +59,14 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-audit/
+/audit/
 
 # Temporary & Backup Files
 *.bak
 *.tmp
 *.temp
+.local-backups/
+.runtime/
 
 # Operating System Files
 .DS_Store

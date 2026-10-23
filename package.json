@@ -8,39 +8,33 @@
     "frontend"
   ],
   "scripts": {
-    "dev:backend": "cd backend && npm run start:dev",
-    "dev:frontend": "cd frontend && npm run dev",
-    "build:backend": "cd backend && npm run build",
-    "build:frontend": "cd frontend && npm run build",
-    "test:backend": "cd backend && npm run test:unit",
-    "lint:backend": "cd backend && npm run lint",
-    "lint:frontend": "cd frontend && npm run lint",
+    "dev:backend": "node scripts/project-node.cjs npm run start:dev -w backend --",
+    "dev:frontend": "node scripts/project-node.cjs npm run dev -w frontend --",
+    "build:backend": "node scripts/project-node.cjs npm run build -w backend --",
+    "build:frontend": "node scripts/project-node.cjs npm run build -w frontend --",
+    "test:backend": "node scripts/project-node.cjs npm run test:unit -w backend --",
+    "lint:backend": "node scripts/project-node.cjs npm run lint -w backend --",
+    "lint:frontend": "node scripts/project-node.cjs npm run lint -w frontend --",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
-  },
-  "devDependencies": {
-    "sprintf-js": "^1.1.3"
+    "docker:logs": "docker compose logs -f",
+    "node": "node scripts/project-node.cjs",
+    "npm": "node scripts/project-node.cjs npm",
+    "verify:providers": "node scripts/project-node.cjs scripts/verify-providers.mjs"
   },
   "overrides": {
     "proxy-addr": "^2.0.8",
-    "sprintf-js": "$sprintf-js",
-    "argparse": {
-      "sprintf-js": "$sprintf-js"
-    },
-    "js-yaml": {
-      "argparse": {
-        "sprintf-js": "$sprintf-js"
-      }
-    },
     "@istanbuljs/load-nyc-config": {
-      "js-yaml": {
-        "argparse": {
-          "sprintf-js": "$sprintf-js"
-        }
-      }
+      "js-yaml": "^4.1.1",
+      ".": "$@istanbuljs/load-nyc-config"
     },
     "sharp": "^0.35.5",
     "source-map-js": "^1.2.2"
+  },
+  "engines": {
+    "node": "^22.22.3 || ^24.15.0 || >=26.0.0"
+  },
+  "devDependencies": {
+    "@istanbuljs/load-nyc-config": "1.1.0"
   }
 }

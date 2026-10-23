@@ -1,82 +1,49 @@
-# AI Agents Specification
+# AI agents and execution boundaries
 
-This project uses an AI orchestration layer to enhance the deterministic reconciliation engine. The primary AI agent is the **AI Finance Controller**, which operates as an intelligent assistant for financial operations.
+LedgerMind is a learning project using synthetic data and optional provider test calls. The [behavior contract](docs/architecture/behavior-contract.md) defines shared rules, the [PRD](docs/product/prd.md) defines product and approval requirements, and the [verification record](docs/operations/fix-verification.md) records tested cases. The [historical audit](docs/operations/full-code-audit-2026-10-21.md) describes earlier defects.
 
-## Agent Roles
+## AI Finance Controller
 
-### 1. AI Finance Controller (Orchestrator)
-- **Purpose**: Investigate exceptions, explain discrepancies, recommend actions, and answer natural-language queries.
-- **Input**: Structured exception data, transaction details, customer/merchant context.
-- **Output**: Human-readable analysis, prioritized recommendations, and function calls to execute approved actions.
-- **Tools** (via function calling, implemented as a NestJS service):
-  - `get_transaction(transaction_id)`
-  - `get_order(order_id)`
-  - `get_payment(payment_id)`
-  - `get_refund(refund_id)`
-  - `get_settlement(settlement_id)`
-  - `find_related_transactions(transaction_id)`
-  - `get_exception(exception_id)`
-  - `get_customer_history(customer_id)`
-  - `get_merchant_history(merchant_id)`
-  - `calculate_exposure(exception_id)`
-  - `create_resolution_plan(exception_id)`
-  - `request_refund(payment_id, amount, reason)`
-  - `create_payment_link(order_id, amount)`
-  - `mark_for_review(exception_id)`
+The AI Finance Controller investigates exceptions, explains discrepancies, answers questions, and proposes actions. It consumes merchant-scoped financial facts and returns analysis, evidence references, uncertainty, and proposed next steps.
 
-### 2. Policy Engine Agent (Deterministic, not LLM)
-- **Purpose**: Enforce business rules for actions (e.g., refund amount limits, approval requirements).
-- **Input**: Proposed action from AI, current user role, exception severity.
-- **Output**: `allowed` or `denied`, with required approval level.
-- **Implementation**: NestJS guard/service integrated with the Action Engine.
+Its tools are implemented in the NestJS AI service. The current catalogue has 16 tools: 13 discovery/advisory functions and three proposal functions. The [AI specification](docs/specifications/ai-agent.md#current-tool-catalogue) lists their names and purposes.
 
-### 3. Audit Agent (Logging)
-- **Purpose**: Record every AI decision, recommendation, and executed action.
-- **Implementation**: Part of the core system, not a separate AI. Uses Prisma to write to `audit_logs`.
+request_refund, create_payment_link, and mark_for_review return proposal data. They do not persist actions, call the Action Engine, or execute provider writes. An authenticated FINANCE or ADMIN operator submits a proposal separately.
 
-## Interaction Flow
+## Deterministic policy and audit
 
-```
-Exception created
-      │
-      ▼
-AI Finance Controller invoked (get_exception, get_transaction, ...)
-      │
-      ▼
-AI gathers evidence via tools (read-only)
-      │
-      ▼
-AI produces analysis: likely_cause, confidence, exposure, recommended_action
-      │
-      ▼
-AI proposes an action (e.g. request_refund) — not executed yet
-      │
-      ▼
-Policy Engine Agent evaluates: allowed / denied + approval level required
-      │
-      ▼
-Human approver reviews AI recommendation + policy result
-      │
-      ▼
-Action Engine executes (calls Razorpay API) if approved
-      │
-      ▼
-Audit Agent logs actor, reason, before/after state
+| Component | Responsibility |
+| --- | --- |
+| PolicyService | Evaluates action type, role, amount, and required approval count. It is deterministic code, not an LLM. |
+| Action Engine | Validates scoped targets and current eligibility, reserves capacity, enforces distinct approvals, and executes authorized local/simulated/test operations. |
+| Audit persistence | Records required AI responses and action decisions/outcomes through Prisma. It is part of the application, not an independent AI agent. |
+
+Required audit writes participate in the relevant database transaction. An audit failure must not silently produce a successful persisted analysis or action completion.
+
+## Interaction flow
+
+```mermaid
+flowchart TD
+    E[Exception and financial evidence] --> AI[AI investigates using scoped tools]
+    AI --> P[Analysis and proposal data]
+    P --> O[Authenticated operator submits proposal]
+    O --> V[Policy and domain validation]
+    V --> A[Policy auto-approval or distinct ADMIN approvals]
+    A --> X[Action Engine executes authorized operation]
+    X --> R[Audit and outcome evidence]
+    R --> C[Reconciliation confirms clearance]
 ```
 
-_(Note: expand this into a sequence diagram once the NestJS module boundaries are finalized — see `docs/architecture/overview.md` for the component diagram this flow maps to.)_
+AI confidence is advisory. It does not replace authorization, financial evidence, or required human approvals. A provider response and exception clearance are separate facts.
 
-## Model Selection
+## Model configuration
 
-- Primary model: **`llama-3.3-70b-versatile`** on Groq (configurable via the `AI_MODEL` env var), with function calling enabled.
-- Tool definitions are provided as standard OpenAI-style JSON tool schemas through Groq's OpenAI-compatible endpoint (`https://api.groq.com/openai/v1`).
-- The backend parses the function call requests and executes the corresponding NestJS service methods.
-- Responses are formatted as JSON for the frontend.
+The application uses Groq's OpenAI-compatible endpoint, https://api.groq.com/openai/v1. AI_ENABLED defaults to false through application configuration. Enabling provider calls requires a valid GROQ_API_KEY. AI_MODEL defaults to llama-3.3-70b-versatile and can be overridden explicitly; Compose uses the same fallback.
 
-## Evaluation
+Tool definitions use OpenAI-style JSON schemas. The backend validates tool names and arguments, runs the allowed NestJS methods, and validates the final analysis before persistence. See [local setup](docs/operations/local-development.md#optional-groq-setup) for configuration and [testing](docs/operations/testing.md#optional-provider-checks) for optional connectivity checks.
 
-The AI agent's performance is evaluated on:
-- Accuracy of root-cause identification (against labeled synthetic data)
-- Quality of explanations (clarity, relevance)
-- Safety of recommendations (no risky actions without approval)
-- Response time (target < 2 seconds for simple queries)
+## Evaluation and status
+
+Evaluate root-cause accuracy against labeled synthetic cases, explanation clarity, evidence quality, safe proposal boundaries, and measured latency. A simple-query target below two seconds remains an unverified benchmark rather than a service guarantee.
+
+Use the [backlog](TODO.md) for optional exercises and the [verification record](docs/operations/fix-verification.md#verification-boundaries-and-remaining-learning-work) for evidence limits.

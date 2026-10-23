@@ -1,6 +1,22 @@
+import { randomUUID } from 'node:crypto';
+import { parseDateRange, requireInr } from '../../common/utils/pagination.js';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
-import { Prisma, Severity, ReconciliationRunStatus, MatchEntityType, MatchMethod, ExceptionType, ImpactLevel, ExceptionStatus, Order, Payment, Refund, Settlement, BankTransaction } from '@prisma/client';
+import {
+  Prisma,
+  Severity,
+  ReconciliationRunStatus,
+  MatchEntityType,
+  MatchMethod,
+  ExceptionType,
+  ImpactLevel,
+  ExceptionStatus,
+  Order,
+  Payment,
+  Refund,
+  Settlement,
+  BankTransaction,
+} from '@prisma/client';
 
 /**
  * Evidence item for an exception audit trail.
@@ -41,10 +57,10 @@ function toSnapshot(entity: unknown): Prisma.InputJsonValue {
   );
 }
 
-function evidence(
+function evidence<T extends { id: string }>(
   eventType: string,
   entityType: string,
-  entity: { id: string },
+  entity: T,
   occurredAt: Date | null | undefined,
 ): ExceptionEventDraft {
   return {
@@ -71,498 +87,1010 @@ export interface RunReconciliationArgs {
   dateTo?: string;
 }
 
-/**
- * Deterministic 3-way reconciliation engine (Gateway, Bank, Ledger).
- * Matching ladder: Exact ID -> UTR -> Amount and time window proximity.
- */
+const abs = (amount: bigint) => (amount < 0n ? -amount : amount);
+const hasCapture = (p: Payment) =>
+  ['CAPTURED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(p.status);
+const sla = (name: string, fallbackHours: number) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0
+    ? value * 3600000
+    : fallbackHours * 3600000;
+};
+const overdue = (at: Date, duration: number) =>
+  Date.now() - at.getTime() > duration;
+
 @Injectable()
 export class ReconciliationService {
   private readonly logger = new Logger(ReconciliationService.name);
-
-  // Weights prioritize customer-facing exposure first, followed by monetary scale and unresolved duration.
-  private readonly FINANCIAL_IMPACT_WEIGHT = 0.5;
-  private readonly CUSTOMER_IMPACT_WEIGHT = 20;
-  private readonly AGE_WEIGHT = 0.5;
-  private readonly RECURRENCE_WEIGHT = 5;
-
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * Reconciles gateway records against bank transactions for a single merchant over an optional window.
-   * Idempotent: repeated runs update severity and occurrence counts without creating duplicate exceptions.
-   *
-   * @throws PrismaClientKnownRequestError if transaction persistence fails.
-   */
   async runReconciliation(args: RunReconciliationArgs) {
-    const { merchantId, dateFrom, dateTo } = args;
-
-    const dateFilter: Record<string, Date> = {};
-    if (dateFrom) dateFilter['gte'] = new Date(dateFrom);
-    if (dateTo) dateFilter['lte'] = new Date(dateTo);
-    const dateCondition = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
-
-    const [orders, payments, refunds, settlements, bankTransactions] = await Promise.all([
-      this.prisma.order.findMany({ where: { merchantId, ...dateCondition } }),
-      this.prisma.payment.findMany({ where: { merchantId, ...dateCondition } }),
-      this.prisma.refund.findMany({ where: { merchantId, ...dateCondition } }),
-      this.prisma.settlement.findMany({ where: { merchantId, ...dateCondition } }),
-      this.prisma.bankTransaction.findMany({ where: { merchantId, ...dateCondition } }),
-    ]);
-
-    const exceptionsToUpsert: ExceptionDraft[] = [];
-    const matchesToCreate: MatchDraft[] = [];
-
-    this.checkOrderPayment(orders, payments, exceptionsToUpsert, matchesToCreate, merchantId);
-    this.checkPaymentSettlement(payments, settlements, exceptionsToUpsert, matchesToCreate, merchantId);
-    this.checkSettlementBank(settlements, bankTransactions, exceptionsToUpsert, matchesToCreate, merchantId);
-    this.checkRefundDelay(refunds, exceptionsToUpsert, merchantId);
-    // Detects orphan credits where the bank settled funds despite gateway failure.
-    this.checkBankPaymentMismatch(payments, bankTransactions, exceptionsToUpsert, merchantId);
-
-    const results = await this.prisma.$transaction(async (tx) => {
-      const run = await tx.reconciliationRun.create({
-        data: {
-          merchantId,
-          status: ReconciliationRunStatus.IN_PROGRESS,
-          dateFrom: dateFrom ? new Date(dateFrom) : null,
-          dateTo: dateTo ? new Date(dateTo) : null,
-          totalRecords: orders.length + payments.length + refunds.length + settlements.length + bankTransactions.length,
-        },
-      });
-
-      for (const match of matchesToCreate) {
-        await tx.reconciliationMatch.upsert({
-          where: {
-            run_pair_unique: {
-              runId: run.id,
-              sourceType: match.sourceType,
-              sourceId: match.sourceId,
-              targetType: match.targetType,
-              targetId: match.targetId,
-            }
-          },
-          create: {
-            ...match,
-            runId: run.id,
-          },
-          update: {},
-        });
-      }
-
-      let created = 0;
-      let updated = 0;
-      let counter = 1;
-
-      for (const exc of exceptionsToUpsert) {
-        const existing = await tx.exception.findUnique({ where: { dedupKey: exc.dedupKey } });
-        
-        const occurrenceCount = existing ? existing.occurrenceCount + 1 : 1;
-        const now = new Date();
-        const firstSeen = existing ? existing.createdAt : now;
-        const ageInHours = (now.getTime() - firstSeen.getTime()) / (1000 * 60 * 60);
-
-        let customerImpactRating = 1; // LOW
-        if (exc.customerImpact === 'HIGH') customerImpactRating = 3;
-        if (exc.customerImpact === 'MEDIUM') customerImpactRating = 2;
-
-        // Difference amount is stored in paise; convert to rupees so weight scales with standard currency units.
-        const diffAmtStr = exc.differenceAmount.toString();
-        const diffNum = Number(diffAmtStr);
-        const diffInRupees = Math.abs(diffNum) / 100;
-
-        const score = (this.FINANCIAL_IMPACT_WEIGHT * diffInRupees)
-                    + (this.CUSTOMER_IMPACT_WEIGHT * customerImpactRating)
-                    + (this.AGE_WEIGHT * ageInHours)
-                    + (this.RECURRENCE_WEIGHT * occurrenceCount);
-        
-        let calculatedSeverity: Severity = 'LOW';
-        if (score >= 200) calculatedSeverity = 'CRITICAL';
-        else if (score >= 100) calculatedSeverity = 'HIGH';
-        else if (score >= 50) calculatedSeverity = 'MEDIUM';
-
-        if (existing) {
-          await tx.exception.update({
-            where: { id: existing.id },
-            data: {
-              severity: calculatedSeverity,
-              lastSeenAt: now,
-              occurrenceCount,
-              severityScore: Math.round(score),
-            },
-          });
-          await this.writeExceptionEvents(tx, existing.id, exc, now);
-          updated++;
-        } else {
-          // Counter suffix guarantees unique keys when multiple exceptions are detected within the same second.
-          const timestamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
-          const excId = `EXC-${timestamp}-${counter.toString().padStart(3, '0')}`;
-          counter++;
-
-          const createdExc = await tx.exception.create({
-            data: {
-              ...this.toExceptionData(exc),
-              exceptionId: excId,
-              severity: calculatedSeverity,
-              severityScore: Math.round(score),
-              runId: run.id,
-            },
-          });
-          await this.writeExceptionEvents(tx, createdExc.id, exc, now);
-          created++;
-        }
-      }
-
-      await tx.reconciliationRun.update({
-        where: { id: run.id },
-        data: {
-          status: ReconciliationRunStatus.COMPLETED,
-          finishedAt: new Date(),
-          matchedCount: matchesToCreate.length,
-          exceptionCount: created + updated,
-        }
-      });
-
-      return { created, updated, totalExceptions: created + updated, runId: run.id };
-    });
-
-    return {
-      message: 'Reconciliation completed deterministically',
-      recordsProcessed: orders.length + payments.length + refunds.length + settlements.length + bankTransactions.length,
-      exceptions: results,
-    };
-  }
-
-  /**
-   * Strips transient timeline events so draft payloads match the Prisma Exception table schema.
-   */
-  private toExceptionData(exc: ExceptionDraft) {
-    const { events: _events, ...data } = exc;
-    return data;
-  }
-
-  /**
-   * Persists evidence timeline events and appends the terminal EXCEPTION_DETECTED record.
-   * Upserts ensure re-runs refresh state snapshots without duplicating timeline entries.
-   */
-  private async writeExceptionEvents(
-    tx: Prisma.TransactionClient,
-    exceptionId: string,
-    exc: ExceptionDraft,
-    detectedAt: Date,
-  ) {
-    const events: ExceptionEventDraft[] = [
-      ...exc.events,
-      {
-        eventType: 'EXCEPTION_DETECTED',
-        entityType: exc.primaryEntityType,
-        entityId: exc.primaryEntityId,
-        snapshot: {
-          type: exc.type,
-          financialImpact: exc.financialImpact.toString(),
-          differenceAmount: exc.differenceAmount.toString(),
-        },
-        occurredAt: detectedAt,
-      },
-    ];
-
-    for (const ev of events) {
-      await tx.exceptionEvent.upsert({
+    const range = parseDateRange(args.dateFrom, args.dateTo);
+    const { merchantId } = args;
+    // Commit a visible run before doing financial work. Coordinate competing
+    // starts with a merchant advisory lock; an interrupted run expires explicitly.
+    const started = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${merchantId}, 2))`;
+      await tx.reconciliationRun.updateMany({
         where: {
-          exception_event_unique: {
-            exceptionId,
-            eventType: ev.eventType,
-            entityId: ev.entityId,
-          },
+          merchantId,
+          status: 'IN_PROGRESS',
+          startedAt: { lt: new Date(Date.now() - 300000) },
         },
-        create: {
-          exceptionId,
-          eventType: ev.eventType,
-          entityType: ev.entityType,
-          entityId: ev.entityId,
-          snapshot: ev.snapshot,
-          occurredAt: ev.occurredAt,
-        },
-        update: {
-          entityType: ev.entityType,
-          snapshot: ev.snapshot,
-          occurredAt: ev.occurredAt,
+        data: {
+          status: 'FAILED',
+          errorMessage: 'Run interrupted or lease expired',
+          finishedAt: new Date(),
         },
       });
+      const existing = await tx.reconciliationRun.findFirst({
+        where: { merchantId, status: 'IN_PROGRESS' },
+        orderBy: { startedAt: 'desc' },
+      });
+      if (existing) return { run: existing, coalesced: true };
+      return {
+        run: await tx.reconciliationRun.create({
+          data: { merchantId, dateFrom: range.gte, dateTo: range.lte },
+        }),
+        coalesced: false,
+      };
+    });
+    if (started.coalesced)
+      return {
+        status: 'IN_PROGRESS',
+        coalesced: true,
+        runId: started.run.id,
+        message: 'A reconciliation run is already in progress',
+      };
+    const runId = started.run.id;
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${merchantId}, 1))`;
+          const [orders, payments, refunds, settlements, bank, allocations] =
+            await Promise.all([
+              tx.order.findMany({ where: { merchantId } }),
+              tx.payment.findMany({ where: { merchantId } }),
+              tx.refund.findMany({ where: { merchantId } }),
+              tx.settlement.findMany({ where: { merchantId } }),
+              tx.bankTransaction.findMany({ where: { merchantId } }),
+              tx.settlementAllocation.findMany({
+                where: { settlement: { merchantId } },
+              }),
+            ]);
+          for (const record of [
+            ...orders,
+            ...payments,
+            ...settlements,
+            ...bank,
+          ])
+            requireInr(record.currency);
+          const scoped = !!(args.dateFrom || args.dateTo);
+          const inRange = (at: Date) =>
+            (!range.gte || at >= range.gte) && (!range.lte || at <= range.lte);
+          const anchors = new Set<string>();
+          for (const record of [...orders, ...payments, ...refunds])
+            if (!scoped || inRange(record.createdAt)) anchors.add(record.id);
+          for (const record of settlements)
+            if (!scoped || inRange(record.settlementDate))
+              anchors.add(record.id);
+          for (const record of bank)
+            if (!scoped || inRange(record.transactionDate))
+              anchors.add(record.id);
+          // Expand selected anchors through explicit relations, retaining evidence
+          // outside the requested date window. Never infer membership by amount.
+          let changed = true;
+          const link = (a: string, b: string | null) => {
+            if (b && (anchors.has(a) || anchors.has(b))) {
+              const size = anchors.size;
+              anchors.add(a);
+              anchors.add(b);
+              if (anchors.size !== size) changed = true;
+            }
+          };
+          while (changed) {
+            changed = false;
+            for (const p of payments) link(p.id, p.orderId);
+            for (const r of refunds) link(r.id, r.paymentId);
+            for (const a of allocations) link(a.paymentId, a.settlementId);
+            for (const b of bank) {
+              link(b.id, b.settlementId);
+              link(b.id, b.paymentId);
+              link(b.id, b.refundId);
+            }
+          }
+          const exceptions: ExceptionDraft[] = [],
+            matches: MatchDraft[] = [];
+          this.checkOrderPayment(
+            orders,
+            payments,
+            exceptions,
+            matches,
+            merchantId,
+            refunds,
+          );
+          this.checkPaymentSettlement(
+            payments,
+            settlements,
+            exceptions,
+            matches,
+            merchantId,
+            allocations,
+            refunds,
+          );
+          this.checkSettlementBank(
+            settlements,
+            bank,
+            exceptions,
+            matches,
+            merchantId,
+          );
+          this.checkRefundDelay(refunds, exceptions, merchantId);
+          for (const payment of payments) {
+            const returned = refunds.filter(
+              (r) => r.paymentId === payment.id && r.status === 'PROCESSED',
+            );
+            const totalReturned = returned.reduce(
+              (sum, r) => sum + r.amount,
+              0n,
+            );
+            if (totalReturned > payment.amount)
+              this.draft(
+                exceptions,
+                merchantId,
+                'REFUND_MISMATCH',
+                'PAYMENT',
+                payment.id,
+                payment.amount,
+                totalReturned,
+                'HIGH',
+                returned.map((r) =>
+                  evidence(
+                    'OVER_REFUND',
+                    'REFUND',
+                    r,
+                    r.processedAt ?? r.createdAt,
+                  ),
+                ),
+              );
+          }
+          this.checkBankPaymentMismatch(
+            payments,
+            bank,
+            exceptions,
+            merchantId,
+            matches,
+          );
+          this.checkRefundBank(refunds, bank, exceptions, matches, merchantId);
+          const used = new Set(
+            matches
+              .filter((m) => m.targetType === 'BANK_TRANSACTION')
+              .map((m) => m.targetId),
+          );
+          for (const b of bank.filter(
+            (b) => b.status === 'POSTED' && !used.has(b.id),
+          )) {
+            this.draft(
+              exceptions,
+              merchantId,
+              'UNKNOWN_EXCEPTION',
+              'BANK_TRANSACTION',
+              b.id,
+              0n,
+              b.amount,
+              'MEDIUM',
+              [
+                evidence(
+                  'UNALLOCATED_BANK_MOVEMENT',
+                  'BANK_TRANSACTION',
+                  b,
+                  b.valueAt ?? b.transactionDate,
+                ),
+              ],
+            );
+          }
+          const selected = exceptions.filter(
+            (e) => !scoped || anchors.has(e.primaryEntityId),
+          );
+          let created = 0,
+            updated = 0,
+            resolved = 0;
+          const now = new Date();
+          for (const draft of selected) {
+            let existing = await tx.exception.findUnique({
+              where: { dedupKey: draft.dedupKey },
+            });
+            if (existing) {
+              // Derive lifecycle fields from the locked current row, including
+              // decisions committed after the initial detector observation.
+              await tx.$queryRaw`SELECT id FROM exceptions WHERE id = ${existing.id}::uuid FOR UPDATE`;
+              existing = await tx.exception.findUnique({
+                where: { id: existing.id },
+              });
+            }
+            const occurrenceCount = existing
+              ? existing.occurrenceCount +
+                (existing.status === 'RESOLVED' ? 1 : 0)
+              : 1;
+            const ageHours = existing
+              ? Math.max(
+                  0,
+                  (now.getTime() - existing.createdAt.getTime()) / 3600000,
+                )
+              : 0;
+            const rating =
+              draft.customerImpact === 'HIGH'
+                ? 3
+                : draft.customerImpact === 'MEDIUM'
+                  ? 2
+                  : 1;
+            const score = Math.min(
+              2147483647,
+              Math.round(
+                Number(abs(draft.financialImpact)) / 200 +
+                  rating * 20 +
+                  ageHours * 0.5 +
+                  occurrenceCount * 5,
+              ),
+            );
+            const severity: Severity =
+              score >= 200
+                ? 'CRITICAL'
+                : score >= 100
+                  ? 'HIGH'
+                  : score >= 50
+                    ? 'MEDIUM'
+                    : 'LOW';
+            const { events, ...facts } = draft;
+            const status =
+              existing?.status === 'IGNORED'
+                ? 'IGNORED'
+                : existing?.status === 'INVESTIGATING'
+                  ? 'INVESTIGATING'
+                  : 'OPEN';
+            const row = await tx.exception.upsert({
+              where: { dedupKey: draft.dedupKey },
+              create: {
+                ...facts,
+                status,
+                exceptionId: `EXC-${randomUUID()}`,
+                severity,
+                severityScore: score,
+                runId,
+              },
+              update: {
+                ...facts,
+                status,
+                severity,
+                severityScore: score,
+                occurrenceCount,
+                lastSeenAt: now,
+                runId,
+                resolvedAt: null,
+                resolutionNote:
+                  existing?.status === 'RESOLVED'
+                    ? 'Reopened: discrepancy observed again'
+                    : existing?.resolutionNote,
+              },
+            });
+            if (existing?.status === 'RESOLVED' && status !== 'IGNORED') {
+              await tx.exceptionEvent.create({
+                data: {
+                  exceptionId: row.id,
+                  eventType: 'REOPENED',
+                  entityType: 'RECONCILIATION_RUN',
+                  entityId: runId,
+                  occurredAt: now,
+                  snapshot: {
+                    previousStatus: existing.status,
+                    status: row.status,
+                  },
+                },
+              });
+            }
+            for (const ev of events)
+              await tx.exceptionEvent.upsert({
+                where: {
+                  exception_event_unique: {
+                    exceptionId: row.id,
+                    eventType: ev.eventType,
+                    entityId: ev.entityId,
+                  },
+                },
+                create: { ...ev, exceptionId: row.id },
+                update: { snapshot: ev.snapshot, occurredAt: ev.occurredAt },
+              });
+            existing ? updated++ : created++;
+          }
+          const keys = selected.map((e) => e.dedupKey);
+          const candidates = await tx.exception.findMany({
+            where: {
+              merchantId,
+              status: { in: ['OPEN', 'INVESTIGATING'] },
+              dedupKey: { notIn: keys },
+              ...(scoped ? { primaryEntityId: { in: [...anchors] } } : {}),
+            },
+          });
+          // Only deterministic detector-owned facts are eligible for automatic closure.
+          for (const old of candidates) {
+            if (!old.dedupKey.startsWith(`${merchantId}:`)) continue;
+            await tx.exception.update({
+              where: { id: old.id },
+              data: {
+                status: 'RESOLVED',
+                resolvedAt: now,
+                resolutionNote:
+                  'Discrepancy no longer present in complete evaluated evidence',
+                runId,
+              },
+            });
+            await tx.exceptionEvent.create({
+              data: {
+                exceptionId: old.id,
+                eventType: 'RESOLVED',
+                entityType: 'RECONCILIATION_RUN',
+                entityId: runId,
+                occurredAt: now,
+                snapshot: {
+                  previousStatus: old.status,
+                  status: 'RESOLVED',
+                  reason:
+                    'Complete evidence no longer contains this discrepancy',
+                },
+              },
+            });
+            resolved++;
+          }
+          const selectedMatches = matches.filter(
+            (m) =>
+              !scoped || anchors.has(m.sourceId) || anchors.has(m.targetId),
+          );
+          for (const match of selectedMatches)
+            await tx.reconciliationMatch.upsert({
+              where: {
+                run_pair_unique: {
+                  runId,
+                  ...{
+                    sourceType: match.sourceType,
+                    sourceId: match.sourceId,
+                    targetType: match.targetType,
+                    targetId: match.targetId,
+                  },
+                },
+              },
+              create: { ...match, runId },
+              update: {},
+            });
+          const captures = payments.filter(
+            (p) => hasCapture(p) && (!scoped || anchors.has(p.id)),
+          );
+          const covered = new Set(
+            selectedMatches
+              .filter(
+                (m) =>
+                  m.sourceType === 'PAYMENT' && m.targetType === 'SETTLEMENT',
+              )
+              .map((m) => m.sourceId),
+          );
+          const totalRecords =
+            orders.length +
+            payments.length +
+            refunds.length +
+            settlements.length +
+            bank.length;
+          await tx.reconciliationRun.update({
+            where: { id: runId },
+            data: {
+              status: 'COMPLETED',
+              finishedAt: now,
+              totalRecords: scoped ? anchors.size : totalRecords,
+              matchedCount: selectedMatches.length,
+              exceptionCount: selected.length,
+              resolvedCount: resolved,
+              capturedPayments: captures.length,
+              matchedPayments: captures.filter((p) => covered.has(p.id)).length,
+              capturedVolume: captures.reduce((sum, p) => sum + p.amount, 0n),
+            },
+          });
+          return {
+            status: 'COMPLETED',
+            message: 'Reconciliation completed deterministically',
+            runId,
+            recordsProcessed: scoped ? anchors.size : totalRecords,
+            exceptions: {
+              created,
+              updated,
+              resolved,
+              totalExceptions: selected.length,
+              runId,
+            },
+          };
+        },
+        { timeout: 120000, maxWait: 10000 },
+      );
+    } catch (error) {
+      await this.prisma.reconciliationRun.update({
+        where: { id: runId },
+        data: {
+          status: 'FAILED',
+          finishedAt: new Date(),
+          errorMessage: String(error),
+        },
+      });
+      throw error;
     }
   }
-  
-  /**
-   * Identifies breaks between orders and gateway payments.
-   * Flags unpaid orders with missing capture, split/duplicate captures, and currency amount mismatches.
-   */
-  private checkOrderPayment(orders: Order[], payments: Payment[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
+
+  private draft(
+    out: ExceptionDraft[],
+    merchantId: string,
+    type: ExceptionType,
+    entityType: string,
+    id: string,
+    expected: bigint,
+    actual: bigint,
+    impact: ImpactLevel,
+    events: ExceptionEventDraft[],
+  ) {
+    out.push({
+      type,
+      merchantId,
+      status: 'OPEN',
+      expectedAmount: expected,
+      actualAmount: actual,
+      differenceAmount: abs(expected - actual),
+      financialImpact: abs(expected - actual),
+      customerImpact: impact,
+      dedupKey: `${merchantId}:${type}:${type === 'BANK_MISMATCH' ? `${entityType}:` : ''}${id}${events[0]?.eventType === 'SETTLEMENT_ALLOCATION' ? ':ALLOCATION' : ''}`,
+      primaryEntityType: entityType,
+      primaryEntityId: id,
+      events,
+    });
+  }
+  private match(
+    out: MatchDraft[],
+    sourceType: MatchEntityType,
+    sourceId: string,
+    targetType: MatchEntityType,
+    targetId: string,
+    method: MatchMethod = 'EXACT_ID',
+  ) {
+    out.push({
+      sourceType,
+      sourceId,
+      targetType,
+      targetId,
+      matchMethod: method,
+      matchScore: method === 'AMOUNT_TIME' ? 80 : 100,
+    });
+  }
+
+  private checkOrderPayment(
+    orders: Order[],
+    payments: Payment[],
+    exceptions: ExceptionDraft[],
+    matches: MatchDraft[],
+    merchantId: string,
+    refunds: Refund[] = [],
+  ) {
     for (const order of orders) {
-      if (order.status !== 'PAID') continue;
-
-      const relatedPayments = payments.filter((p) => p.orderId === order.id && p.status === 'CAPTURED');
-
-      if (relatedPayments.length === 0) {
-        exceptions.push({
-          type: 'PAYMENT_MISSING',
+      const captured = payments.filter(
+        (p) =>
+          p.orderId === order.id &&
+          hasCapture(p) &&
+          p.currency === order.currency,
+      );
+      const total = captured.reduce((sum, p) => sum + p.amount, 0n);
+      const returned = refunds
+        .filter(
+          (r) =>
+            r.status === 'PROCESSED' &&
+            captured.some((p) => p.id === r.paymentId),
+        )
+        .reduce((sum, r) => sum + r.amount, 0n);
+      const ev = [
+        evidence('ORDER_PLACED', 'ORDER', order, order.createdAt),
+        ...captured.map((p) =>
+          evidence(
+            'PAYMENT_CAPTURED',
+            'PAYMENT',
+            p,
+            p.capturedAt ?? p.createdAt,
+          ),
+        ),
+      ];
+      if (['CANCELLED', 'FAILED'].includes(order.status)) {
+        if (total > returned)
+          this.draft(
+            exceptions,
+            merchantId,
+            'ORDER_PAYMENT_MISMATCH',
+            'ORDER',
+            order.id,
+            0n,
+            total - returned,
+            'HIGH',
+            ev,
+          );
+        continue;
+      }
+      if (
+        total < order.amount &&
+        (order.status === 'PAID' ||
+          overdue(order.createdAt, sla('ORDER_PAYMENT_SLA_HOURS', 1)))
+      ) {
+        this.draft(
+          exceptions,
           merchantId,
-          status: 'OPEN',
-          expectedAmount: order.amount,
-          actualAmount: BigInt(0),
-          differenceAmount: order.amount,
-          financialImpact: order.amount,
-          customerImpact: 'HIGH',
-          dedupKey: `${merchantId}:PAYMENT_MISSING:${order.id}`,
-          primaryEntityType: 'ORDER',
-          primaryEntityId: order.id,
-          events: [evidence('ORDER_PLACED', 'ORDER', order, order.createdAt)],
+          total === 0n ? 'PAYMENT_MISSING' : 'ORDER_PAYMENT_MISMATCH',
+          'ORDER',
+          order.id,
+          order.amount,
+          total,
+          'HIGH',
+          ev,
+        );
+      } else if (total - returned > order.amount) {
+        this.draft(
+          exceptions,
+          merchantId,
+          'DUPLICATE_PAYMENT',
+          'ORDER',
+          order.id,
+          order.amount,
+          total - returned,
+          'HIGH',
+          ev,
+        );
+      } else if (total >= order.amount)
+        for (const p of captured)
+          this.match(matches, 'ORDER', order.id, 'PAYMENT', p.id);
+    }
+  }
+
+  private checkPaymentSettlement(
+    payments: Payment[],
+    settlements: Settlement[],
+    exceptions: ExceptionDraft[],
+    matches: MatchDraft[],
+    merchantId: string,
+    allocations: {
+      paymentId: string;
+      settlementId: string;
+      grossAmount: bigint;
+      refundAmount: bigint;
+      feeAmount: bigint;
+      taxAmount: bigint;
+      adjustmentAmount: bigint;
+    }[] = [],
+    refunds: Refund[] = [],
+  ) {
+    const validSettlements = new Set<string>();
+    for (const s of settlements.filter((s) => s.status === 'PROCESSED')) {
+      const members = allocations.filter((a) => a.settlementId === s.id);
+      const net = members.reduce(
+        (sum, a) =>
+          sum +
+          a.grossAmount -
+          a.refundAmount -
+          a.feeAmount -
+          a.taxAmount +
+          a.adjustmentAmount,
+        0n,
+      );
+      const valid =
+        members.length > 0 &&
+        members.every((a) => {
+          const p = payments.find(
+            (p) =>
+              p.id === a.paymentId &&
+              p.merchantId === merchantId &&
+              p.currency === s.currency &&
+              hasCapture(p),
+          );
+          return (
+            !!p &&
+            a.grossAmount >= 0n &&
+            a.refundAmount >= 0n &&
+            a.feeAmount >= 0n &&
+            a.taxAmount >= 0n &&
+            (a.grossAmount > 0n ||
+              a.refundAmount > 0n ||
+              a.feeAmount > 0n ||
+              a.taxAmount > 0n ||
+              a.adjustmentAmount !== 0n) &&
+            allocations
+              .filter(
+                (x) =>
+                  x.paymentId === a.paymentId &&
+                  settlements.some(
+                    (batch) =>
+                      batch.id === x.settlementId &&
+                      batch.status === 'PROCESSED',
+                  ),
+              )
+              .reduce((sum, x) => sum + x.grossAmount, 0n) <= p.amount &&
+            allocations
+              .filter(
+                (x) =>
+                  x.paymentId === a.paymentId &&
+                  settlements.some(
+                    (batch) =>
+                      batch.id === x.settlementId &&
+                      batch.status === 'PROCESSED',
+                  ),
+              )
+              .reduce((sum, x) => sum + x.refundAmount, 0n) <=
+              refunds
+                .filter(
+                  (r) =>
+                    r.paymentId === a.paymentId && r.status === 'PROCESSED',
+                )
+                .reduce((sum, r) => sum + r.amount, 0n)
+          );
         });
-      } else if (relatedPayments.length > 1) {
-        const actual = relatedPayments.reduce((sum, p) => sum + p.amount, BigInt(0));
-        exceptions.push({
-          type: 'DUPLICATE_PAYMENT',
+      if (!valid || net !== s.amount) {
+        this.draft(
+          exceptions,
           merchantId,
-          status: 'OPEN',
-          expectedAmount: order.amount,
-          actualAmount: actual,
-          differenceAmount: actual - order.amount,
-          financialImpact: actual - order.amount,
-          customerImpact: 'HIGH',
-          dedupKey: `${merchantId}:DUPLICATE_PAYMENT:${order.id}`,
-          primaryEntityType: 'ORDER',
-          primaryEntityId: order.id,
-          events: [
-            evidence('ORDER_PLACED', 'ORDER', order, order.createdAt),
-            ...relatedPayments.map((p) =>
-              evidence('PAYMENT_CAPTURED', 'PAYMENT', p, p.createdAt),
+          'SETTLEMENT_AMOUNT_MISMATCH',
+          'SETTLEMENT',
+          s.id,
+          net,
+          s.amount,
+          'MEDIUM',
+          [
+            evidence(
+              'SETTLEMENT_ALLOCATION',
+              'SETTLEMENT',
+              { ...s, allocations: members },
+              s.settlementDate,
             ),
           ],
-        });
-      } else {
-        const p = relatedPayments[0];
-        
-        matches.push({
-          sourceType: MatchEntityType.ORDER,
-          sourceId: order.id,
-          targetType: MatchEntityType.PAYMENT,
-          targetId: p.id,
-          matchScore: 100,
-          matchMethod: MatchMethod.EXACT_ID,
-        });
-
-        if (p.amount !== order.amount) {
-          const diff = p.amount - order.amount;
-          exceptions.push({
-            type: 'ORDER_PAYMENT_MISMATCH',
-            merchantId,
-            status: 'OPEN',
-            expectedAmount: order.amount,
-            actualAmount: p.amount,
-            differenceAmount: diff > 0 ? diff : -diff,
-            financialImpact: diff > 0 ? diff : -diff,
-            customerImpact: 'HIGH',
-            dedupKey: `${merchantId}:ORDER_PAYMENT_MISMATCH:${order.id}`,
-            primaryEntityType: 'ORDER',
-            primaryEntityId: order.id,
-            events: [
-              evidence('ORDER_PLACED', 'ORDER', order, order.createdAt),
-              evidence('PAYMENT_CAPTURED', 'PAYMENT', p, p.createdAt),
-            ],
-          });
-        }
-      }
-    }
-  }
-
-  /**
-   * Matches captured payments to settlement batches within a 7-day clearing window.
-   * Flags captured payments that have no corresponding settlement batch.
-   */
-  private checkPaymentSettlement(payments: Payment[], settlements: Settlement[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
-    const captured = payments.filter((p) => p.status === 'CAPTURED');
-    const availableSettlements = new Set(settlements.map((s) => s.id));
-
-    for (const payment of captured) {
-      // 7-day window accommodates standard rolling settlement batch schedules.
-      const matched = settlements.find((s) => 
-        availableSettlements.has(s.id) && 
-        s.amount === payment.amount &&
-        Math.abs(new Date(s.createdAt).getTime() - new Date(payment.createdAt).getTime()) < 7 * 24 * 60 * 60 * 1000
-      );
-
-      if (!matched) {
-        exceptions.push({
-          type: 'SETTLEMENT_MISSING',
-          merchantId,
-          status: 'OPEN',
-          expectedAmount: payment.amount,
-          actualAmount: BigInt(0),
-          differenceAmount: payment.amount,
-          financialImpact: payment.amount,
-          customerImpact: 'MEDIUM',
-          dedupKey: `${merchantId}:SETTLEMENT_MISSING:${payment.id}`,
-          primaryEntityType: 'PAYMENT',
-          primaryEntityId: payment.id,
-          events: [evidence('PAYMENT_CAPTURED', 'PAYMENT', payment, payment.createdAt)],
-        });
-      } else {
-        // Enforce 1-to-1 matching to prevent multiple payments claiming the same settlement batch.
-        availableSettlements.delete(matched.id);
-        matches.push({
-          sourceType: MatchEntityType.PAYMENT,
-          sourceId: payment.id,
-          targetType: MatchEntityType.SETTLEMENT,
-          targetId: matched.id,
-          matchScore: 80,
-          matchMethod: MatchMethod.AMOUNT_TIME,
-        });
-      }
-    }
-  }
-
-  /**
-   * Reconciles gateway settlement records against bank account credit entries.
-   * Prefers exact UTR identifier matching; falls back to exact amount within a 3-day clearing window.
-   */
-  private checkSettlementBank(settlements: Settlement[], bankTransactions: BankTransaction[], exceptions: ExceptionDraft[], matches: MatchDraft[], merchantId: string) {
-    const availableBankTxns = new Set(bankTransactions.map(b => b.id));
-
-    for (const s of settlements) {
-      let match = bankTransactions.find((b) => availableBankTxns.has(b.id) && b.utr && b.utr === s.utr);
-      let matchMethod: MatchMethod = MatchMethod.UTR;
-      
-      // Fallback handles bank statements missing explicit UTR headers within standard NEFT/RTGS settlement turnaround.
-      if (!match) {
-        match = bankTransactions.find((b) => 
-          availableBankTxns.has(b.id) && 
-          b.amount === s.amount &&
-          Math.abs(new Date(b.transactionDate).getTime() - new Date(s.createdAt).getTime()) < 3 * 24 * 60 * 60 * 1000
         );
-        matchMethod = MatchMethod.AMOUNT_TIME;
-      }
-
-      if (!match) {
-        exceptions.push({
-          type: 'BANK_MISMATCH',
+      } else validSettlements.add(s.id);
+    }
+    for (const p of payments.filter(hasCapture)) {
+      const members = allocations.filter(
+        (a) => a.paymentId === p.id && validSettlements.has(a.settlementId),
+      );
+      const allocated = members.reduce((sum, a) => sum + a.grossAmount, 0n);
+      if (allocated === p.amount)
+        for (const a of members)
+          this.match(matches, 'PAYMENT', p.id, 'SETTLEMENT', a.settlementId);
+      else if (
+        allocated > p.amount ||
+        overdue(
+          p.capturedAt ?? p.createdAt,
+          sla('PAYMENT_SETTLEMENT_SLA_HOURS', 168),
+        )
+      )
+        this.draft(
+          exceptions,
           merchantId,
-          status: 'OPEN',
-          expectedAmount: s.amount,
-          actualAmount: BigInt(0),
-          differenceAmount: s.amount,
-          financialImpact: s.amount,
-          customerImpact: 'MEDIUM',
-          dedupKey: `${merchantId}:BANK_MISMATCH:SETTLEMENT:${s.id}`,
-          primaryEntityType: 'SETTLEMENT',
-          primaryEntityId: s.id,
-          events: [evidence('SETTLEMENT_CREATED', 'SETTLEMENT', s, s.createdAt)],
-        });
-      } else {
-        availableBankTxns.delete(match.id);
-        matches.push({
-          sourceType: MatchEntityType.SETTLEMENT,
-          sourceId: s.id,
-          targetType: MatchEntityType.BANK_TRANSACTION,
-          targetId: match.id,
-          matchScore: matchMethod === MatchMethod.UTR ? 100 : 80,
-          matchMethod,
-        });
+          'SETTLEMENT_MISSING',
+          'PAYMENT',
+          p.id,
+          p.amount,
+          allocated,
+          'MEDIUM',
+          [
+            evidence(
+              'PAYMENT_CAPTURED',
+              'PAYMENT',
+              p,
+              p.capturedAt ?? p.createdAt,
+            ),
+          ],
+        );
+    }
+  }
 
-        if (match.amount !== s.amount) {
-          const diff = s.amount - match.amount;
-          exceptions.push({
-            type: 'SETTLEMENT_AMOUNT_MISMATCH',
+  private checkSettlementBank(
+    settlements: Settlement[],
+    bank: BankTransaction[],
+    exceptions: ExceptionDraft[],
+    matches: MatchDraft[],
+    merchantId: string,
+  ) {
+    const batches = settlements.filter((s) => s.status === 'PROCESSED');
+    const eligible = bank.filter((b) => {
+      if (
+        b.status !== 'POSTED' ||
+        b.transactionType !== 'CREDIT' ||
+        b.merchantId !== merchantId ||
+        b.refundId ||
+        b.paymentId
+      )
+        return false;
+      // A stored link and a UTR naming a different known batch are contradictory.
+      const referenced = b.utr
+        ? settlements.filter(
+            (s) => s.currency === b.currency && s.utr === b.utr,
+          )
+        : [];
+      return (
+        !b.settlementId ||
+        referenced.length === 0 ||
+        referenced.some((s) => s.id === b.settlementId)
+      );
+    });
+    const compatible = (s: Settlement, b: BankTransaction) =>
+      b.currency === s.currency &&
+      (!b.settlementId || b.settlementId === s.id) &&
+      !(b.utr && s.utr && b.utr !== s.utr);
+    const strong = new Map(
+      batches.map((s) => [
+        s.id,
+        eligible.filter(
+          (b) =>
+            compatible(s, b) &&
+            (b.settlementId === s.id || (!!s.utr && b.utr === s.utr)),
+        ),
+      ]),
+    );
+    const claimCounts = (graph: Map<string, BankTransaction[]>) => {
+      const counts = new Map<string, number>();
+      for (const rows of graph.values())
+        for (const row of rows)
+          counts.set(row.id, (counts.get(row.id) ?? 0) + 1);
+      return counts;
+    };
+    const strongClaims = claimCounts(strong);
+    const chosen = new Map<string, BankTransaction>();
+    const used = new Set<string>();
+    for (const s of batches) {
+      const exact = strong.get(s.id)!;
+      if (exact.length === 1 && strongClaims.get(exact[0].id) === 1) {
+        chosen.set(s.id, exact[0]);
+        used.add(exact[0].id);
+      }
+    }
+    // Never consume evidence claimed by a strong relationship, even if that
+    // relationship is ambiguous. Weak candidates must be unique in both directions.
+    const weak = new Map(
+      batches
+        .filter((s) => strong.get(s.id)!.length === 0)
+        .map((s) => [
+          s.id,
+          eligible.filter(
+            (b) =>
+              !used.has(b.id) &&
+              !strongClaims.has(b.id) &&
+              compatible(s, b) &&
+              !b.settlementId &&
+              !(b.utr && s.utr) &&
+              !(
+                b.utr &&
+                settlements.some(
+                  (other) =>
+                    other.currency === b.currency && other.utr === b.utr,
+                )
+              ) &&
+              b.amount === s.amount &&
+              Math.abs(
+                b.transactionDate.getTime() - s.settlementDate.getTime(),
+              ) <=
+                3 * 86400000,
+          ),
+        ]),
+    );
+    const weakClaims = claimCounts(weak);
+    for (const s of batches) {
+      const candidates = weak.get(s.id) ?? [];
+      if (candidates.length === 1 && weakClaims.get(candidates[0].id) === 1)
+        chosen.set(s.id, candidates[0]);
+    }
+    for (const s of batches) {
+      const match = chosen.get(s.id);
+      if (match) {
+        this.match(
+          matches,
+          'SETTLEMENT',
+          s.id,
+          'BANK_TRANSACTION',
+          match.id,
+          match.settlementId === s.id
+            ? 'EXACT_ID'
+            : match.utr && s.utr
+              ? 'UTR'
+              : 'AMOUNT_TIME',
+        );
+        if (match.amount !== s.amount)
+          this.draft(
+            exceptions,
             merchantId,
-            status: 'OPEN',
-            expectedAmount: s.amount,
-            actualAmount: match.amount,
-            differenceAmount: diff > 0 ? diff : -diff,
-            financialImpact: diff > 0 ? diff : -diff,
-            customerImpact: 'MEDIUM',
-            dedupKey: `${merchantId}:SETTLEMENT_AMOUNT_MISMATCH:${s.id}`,
-            primaryEntityType: 'SETTLEMENT',
-            primaryEntityId: s.id,
-            events: [
-              evidence('SETTLEMENT_CREATED', 'SETTLEMENT', s, s.createdAt),
-              evidence('BANK_CREDIT', 'BANK_TRANSACTION', match, match.transactionDate),
+            'SETTLEMENT_AMOUNT_MISMATCH',
+            'SETTLEMENT',
+            s.id,
+            s.amount,
+            match.amount,
+            'MEDIUM',
+            [
+              evidence(
+                'BANK_CREDIT',
+                'BANK_TRANSACTION',
+                match,
+                match.valueAt ?? match.transactionDate,
+              ),
             ],
-          });
-        }
-      }
+          );
+      } else if (
+        overdue(s.settlementDate, sla('SETTLEMENT_BANK_SLA_HOURS', 72))
+      )
+        this.draft(
+          exceptions,
+          merchantId,
+          'BANK_MISMATCH',
+          'SETTLEMENT',
+          s.id,
+          s.amount,
+          0n,
+          'MEDIUM',
+          [evidence('SETTLEMENT_PROCESSED', 'SETTLEMENT', s, s.settlementDate)],
+        );
     }
   }
-
-  /**
-   * Flags refunds stuck in PROCESSING beyond the 24-hour SLA threshold.
-   */
-  private checkRefundDelay(refunds: Refund[], exceptions: ExceptionDraft[], merchantId: string) {
-    const now = new Date();
-    for (const r of refunds) {
-      if (r.status === 'PROCESSING') {
-        const hoursDiff = (now.getTime() - r.createdAt.getTime()) / (1000 * 60 * 60);
-        if (hoursDiff > 24) {
-          exceptions.push({
-            type: 'REFUND_DELAY',
-            merchantId,
-            status: 'OPEN',
-            expectedAmount: r.amount,
-            actualAmount: r.amount,
-            differenceAmount: BigInt(0),
-            financialImpact: r.amount,
-            customerImpact: 'LOW',
-            dedupKey: `${merchantId}:REFUND_DELAY:${r.id}`,
-            primaryEntityType: 'REFUND',
-            primaryEntityId: r.id,
-            events: [evidence('REFUND_INITIATED', 'REFUND', r, r.createdAt)],
-          });
-        }
-      }
-    }
-  }
-
-  /**
-   * Flags state divergence where the bank received credit for a payment marked FAILED by the gateway.
-   * Occurs during late gateway drop-offs where the acquiring bank captured funds but callback failed.
-   */
-  private checkBankPaymentMismatch(
-    payments: Payment[],
-    bankTransactions: BankTransaction[],
+  private checkRefundDelay(
+    refunds: Refund[],
     exceptions: ExceptionDraft[],
     merchantId: string,
   ) {
-    const failedPayments = payments.filter((p) => p.status === 'FAILED');
-    for (const payment of failedPayments) {
-      // UTR is unavailable on failed gateway transactions; match against unreconciled credits by amount.
-      const bankCredit = bankTransactions.find(
-        (b) =>
-          b.transactionType === 'CREDIT' &&
-          b.amount === payment.amount &&
-          !b.settlementId,
-      );
-      if (bankCredit) {
-        exceptions.push({
-          type: ExceptionType.BANK_PAYMENT_MISMATCH,
+    for (const r of refunds)
+      if (
+        r.status === 'FAILED' ||
+        (['CREATED', 'PROCESSING'].includes(r.status) &&
+          overdue(r.createdAt, sla('REFUND_SLA_HOURS', 24)))
+      ) {
+        this.draft(
+          exceptions,
           merchantId,
-          status: 'OPEN',
-          expectedAmount: BigInt(0),
-          actualAmount: payment.amount,
-          differenceAmount: payment.amount,
-          financialImpact: payment.amount,
-          customerImpact: ImpactLevel.HIGH,
-          dedupKey: `${merchantId}:BANK_PAYMENT_MISMATCH:${payment.id}`,
-          primaryEntityType: MatchEntityType.PAYMENT,
-          primaryEntityId: payment.id,
-          events: [
-            evidence('PAYMENT_FAILED', 'PAYMENT', payment, payment.createdAt),
-            evidence('BANK_CREDIT_RECEIVED', 'BANK_TRANSACTION', bankCredit, bankCredit.transactionDate),
+          r.status === 'FAILED' ? 'REFUND_MISMATCH' : 'REFUND_DELAY',
+          'REFUND',
+          r.id,
+          r.amount,
+          0n,
+          'HIGH',
+          [
+            evidence(
+              'REFUND_STATUS',
+              'REFUND',
+              r,
+              r.processedAt ?? r.createdAt,
+            ),
           ],
-        });
+        );
       }
+  }
+  private checkBankPaymentMismatch(
+    payments: Payment[],
+    bank: BankTransaction[],
+    exceptions: ExceptionDraft[],
+    merchantId: string,
+    matches: MatchDraft[] = [],
+  ) {
+    const used = new Set(
+      matches
+        .filter((m) => m.targetType === 'BANK_TRANSACTION')
+        .map((m) => m.targetId),
+    );
+    for (const p of payments.filter((p) => p.status === 'FAILED')) {
+      const credits = bank.filter(
+        (b) =>
+          !used.has(b.id) &&
+          b.status === 'POSTED' &&
+          b.transactionType === 'CREDIT' &&
+          b.paymentId === p.id &&
+          b.merchantId === merchantId &&
+          b.currency === p.currency &&
+          !b.settlementId &&
+          !b.refundId,
+      );
+      for (const b of credits) {
+        used.add(b.id);
+        this.match(matches, 'PAYMENT', p.id, 'BANK_TRANSACTION', b.id);
+      }
+      if (credits.length > 0)
+        this.draft(
+          exceptions,
+          merchantId,
+          'BANK_PAYMENT_MISMATCH',
+          'PAYMENT',
+          p.id,
+          0n,
+          credits.reduce((sum, b) => sum + b.amount, 0n),
+          'HIGH',
+          [
+            evidence('PAYMENT_FAILED', 'PAYMENT', p, p.createdAt),
+            ...credits.map((b) =>
+              evidence(
+                'BANK_CREDIT_RECEIVED',
+                'BANK_TRANSACTION',
+                b,
+                b.valueAt ?? b.transactionDate,
+              ),
+            ),
+          ],
+        );
     }
   }
-
-  /**
-   * Fetches recent reconciliation runs for a merchant with ISO-formatted timestamps for JSON clients.
-   */
+  private checkRefundBank(
+    refunds: Refund[],
+    bank: BankTransaction[],
+    exceptions: ExceptionDraft[],
+    matches: MatchDraft[],
+    merchantId: string,
+  ) {
+    const used = new Set(
+      matches
+        .filter((m) => m.targetType === 'BANK_TRANSACTION')
+        .map((m) => m.targetId),
+    );
+    for (const r of refunds.filter((r) => r.status === 'PROCESSED')) {
+      const debits = bank.filter(
+        (b) =>
+          !used.has(b.id) &&
+          b.status === 'POSTED' &&
+          b.transactionType === 'DEBIT' &&
+          b.refundId === r.id &&
+          b.merchantId === merchantId &&
+          !b.settlementId &&
+          !b.paymentId,
+      );
+      const amount = debits.reduce((sum, b) => sum + b.amount, 0n);
+      for (const b of debits) {
+        used.add(b.id);
+        this.match(matches, 'REFUND', r.id, 'BANK_TRANSACTION', b.id);
+      }
+      if (
+        amount !== r.amount &&
+        (debits.length > 0 ||
+          overdue(
+            r.processedAt ?? r.createdAt,
+            sla('REFUND_BANK_SLA_HOURS', 72),
+          ))
+      )
+        this.draft(
+          exceptions,
+          merchantId,
+          'REFUND_MISMATCH',
+          'REFUND',
+          r.id,
+          r.amount,
+          amount,
+          'HIGH',
+          [
+            evidence(
+              'REFUND_PROCESSED',
+              'REFUND',
+              r,
+              r.processedAt ?? r.createdAt,
+            ),
+            ...debits.map((b) =>
+              evidence(
+                'BANK_DEBIT',
+                'BANK_TRANSACTION',
+                b,
+                b.valueAt ?? b.transactionDate,
+              ),
+            ),
+          ],
+        );
+    }
+  }
   async listRuns(merchantId: string) {
+    await this.prisma.reconciliationRun.updateMany({
+      where: {
+        merchantId,
+        status: 'IN_PROGRESS',
+        startedAt: { lt: new Date(Date.now() - 300000) },
+      },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        errorMessage: 'Run interrupted or lease expired',
+      },
+    });
     const rows = await this.prisma.reconciliationRun.findMany({
       where: { merchantId },
       orderBy: { startedAt: 'desc' },
@@ -570,47 +1098,60 @@ export class ReconciliationService {
     });
     return rows.map((r) => ({
       ...r,
-      startedAt: r.startedAt?.toISOString(),
+      capturedVolume: r.capturedVolume.toString(),
+      startedAt: r.startedAt.toISOString(),
       completedAt: r.finishedAt?.toISOString() ?? null,
     }));
   }
-
-  /**
-   * Aggregates merchant ledger metrics: capture volume, match rate, and active exception breakdowns.
-   */
   async getStats(merchantId: string) {
     const [
-      volumeAgg,
-      openExceptions,
-      criticalExceptions,
-      pendingApprovals,
-      exceptionsByType,
-      exceptionsBySeverity,
-      totalPayments,
-      matchedCount,
-      resolvedToday,
+      latest,
+      volume,
+      open,
+      critical,
+      pending,
+      types,
+      severities,
+      resolved,
     ] = await Promise.all([
-      this.prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: { merchantId, status: 'CAPTURED' },
+      this.prisma.reconciliationRun.findFirst({
+        where: {
+          merchantId,
+          status: 'COMPLETED',
+          dateFrom: null,
+          dateTo: null,
+        },
+        orderBy: { startedAt: 'desc' },
       }),
-      this.prisma.exception.count({ where: { merchantId, status: 'OPEN' } }),
-      this.prisma.exception.count({ where: { merchantId, status: 'OPEN', severity: 'CRITICAL' } }),
-      this.prisma.action.count({ where: { merchantId, status: 'PENDING_APPROVAL' } }),
+      this.prisma.payment.aggregate({
+        where: {
+          merchantId,
+          status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED', 'REFUNDED'] },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.exception.count({
+        where: { merchantId, status: { in: ['OPEN', 'INVESTIGATING'] } },
+      }),
+      this.prisma.exception.count({
+        where: {
+          merchantId,
+          status: { in: ['OPEN', 'INVESTIGATING'] },
+          severity: 'CRITICAL',
+        },
+      }),
+      this.prisma.action.count({
+        where: { merchantId, status: 'PENDING_APPROVAL' },
+      }),
       this.prisma.exception.groupBy({
         by: ['type'],
-        where: { merchantId },
+        where: { merchantId, status: { in: ['OPEN', 'INVESTIGATING'] } },
         _count: { _all: true },
       }),
       this.prisma.exception.groupBy({
         by: ['severity'],
-        where: { merchantId },
+        where: { merchantId, status: { in: ['OPEN', 'INVESTIGATING'] } },
         _count: { _all: true },
-      }),
-      this.prisma.payment.count({ where: { merchantId } }),
-      // Counts payment-level matches to calculate reconciliation coverage against total captured payments.
-      this.prisma.reconciliationMatch.count({
-        where: { sourceType: MatchEntityType.PAYMENT, run: { merchantId } },
       }),
       this.prisma.exception.count({
         where: {
@@ -620,25 +1161,25 @@ export class ReconciliationService {
         },
       }),
     ]);
-
-    const totalCapturedVolume = volumeAgg._sum.amount ?? BigInt(0);
-    const reconciliationRate =
-      totalPayments > 0
-        ? Number(((matchedCount / totalPayments) * 100).toFixed(2))
-        : 0;
-
     return {
-      total_transaction_volume: totalCapturedVolume.toString(),
-      reconciliation_rate: reconciliationRate,
-      open_exceptions: openExceptions,
-      critical_exceptions: criticalExceptions,
-      pending_approvals: pendingApprovals,
-      resolved_today: resolvedToday,
-      exceptions_by_type: exceptionsByType.map((e) => ({
+      total_transaction_volume: (volume._sum.amount ?? 0n).toString(),
+      reconciliation_rate: latest?.capturedPayments
+        ? Number(
+            ((latest.matchedPayments / latest.capturedPayments) * 100).toFixed(
+              2,
+            ),
+          )
+        : 0,
+      snapshot_at: latest?.finishedAt?.toISOString() ?? null,
+      open_exceptions: open,
+      critical_exceptions: critical,
+      pending_approvals: pending,
+      resolved_today: resolved,
+      exceptions_by_type: types.map((e) => ({
         type: e.type,
         count: e._count._all,
       })),
-      exceptions_by_severity: exceptionsBySeverity.map((e) => ({
+      exceptions_by_severity: severities.map((e) => ({
         severity: e.severity,
         count: e._count._all,
       })),

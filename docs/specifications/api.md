@@ -1,510 +1,175 @@
-# API Specification
+# API reference
 
-## 1. API Overview
+The backend base path is **/api/v1**. Requests and responses use JSON. Protected routes require an `Authorization: Bearer <JWT>` header; merchant and actor identity come from authentication rather than caller-supplied scope.
 
-LedgerMind exposes a REST API through the NestJS backend.
+Public application routes are POST /auth/login, POST /webhooks/razorpay, and GET /health. Health is liveness, not database/Redis readiness. Swagger may also be exposed at /api when enabled. Registration, SSO, token refresh, and an Idempotency-Key request header are not implemented.
 
-### Base Path
+## Wire conventions
 
-```text
-/api/v1
-```
+| Value | Contract |
+| --- | --- |
+| Stored BigInt monetary fields | Decimal strings containing integer paise. JSON proposal amounts and nested action parameters may remain safe integer numbers; do not assume every monetary response value is a string. |
+| Action amount | Positive safe integer JSON number in paise; INR only. Settlement component amounts have separate zero/signed rules below. |
+| Timestamp | ISO-serialized instant. |
+| Record identity | Internal UUID, except exception reads also resolve EXC display IDs; supported discovery/proposal paths may explicitly resolve provider references. |
+| Pagination | Integer page >=1, limit 1-100, and bounded calculated offset. |
+| Success status | GET defaults to 200; Nest POST defaults to 201 unless explicitly overridden. Webhook acknowledgement is explicitly 200. |
 
-### General Rules
+Invalid IDs, enums, dates/ranges, and amounts produce client errors through DTO/domain validation. Swagger response annotations alone do not override runtime HTTP status. Clients must read returned action/reconciliation status rather than treating HTTP success as financial completion.
 
-- Request/response format: JSON
-- Amounts: integer paise
-- Timestamps: UTC ISO-8601
-- Authentication: JWT
-- Authorization: RBAC + Policy Engine where applicable
+## Route catalogue
 
-## 2. Authentication
+Routes below are relative to /api/v1. All protected operations remain merchant scoped, including ADMIN operations.
 
-### POST /auth/register
+| Method | Route | Access |
+| --- | --- | --- |
+| GET | /actions | Authenticated |
+| GET | /ai/config | Authenticated |
+| GET | /audit | Authenticated |
+| GET | /bank-transactions | Authenticated |
+| GET | /bank-transactions/:id | Authenticated |
+| GET | /dashboard/metrics | Authenticated |
+| GET | /exceptions | Authenticated |
+| GET | /exceptions/:id | Authenticated |
+| GET | /exceptions/:id/timeline | Authenticated |
+| GET | /health | Public |
+| GET | /orders | Authenticated |
+| GET | /orders/:id | Authenticated |
+| GET | /payments | Authenticated |
+| GET | /payments/:id | Authenticated |
+| GET | /reconciliation/runs | Authenticated |
+| GET | /reconciliation/stats | Authenticated |
+| GET | /refunds | Authenticated |
+| GET | /refunds/:id | Authenticated |
+| GET | /settlements | Authenticated |
+| GET | /settlements/:id | Authenticated |
+| GET | /transactions | Authenticated |
+| GET | /transactions/:id | Authenticated |
+| GET | /webhooks/events | Authenticated |
+| POST | /actions | FINANCE or ADMIN |
+| POST | /actions/:id/approve | ADMIN; service enforces merchant and review rules |
+| POST | /actions/:id/recover | ADMIN; service enforces merchant and review rules |
+| POST | /actions/:id/reject | FINANCE or ADMIN |
+| POST | /ai/chat | Authenticated |
+| POST | /ai/investigate/:id | Authenticated |
+| POST | /auth/login | Public |
+| POST | /reconciliation/run | FINANCE or ADMIN |
+| POST | /settlements/:id/allocations | FINANCE or ADMIN |
+| POST | /webhooks/events/:id/retry | FINANCE or ADMIN |
+| POST | /webhooks/razorpay | Public |
 
-Creates a merchant and initial administrator account.
+## Authentication and lists
 
-### POST /auth/login
+POST /auth/login accepts email and password. It returns access_token and user with id, email, name, role, and merchantId. Password hashes are not returned. Bad credentials remain an inline login error in the console.
 
-Authenticates a user.
+| Collection | Response envelope |
+| --- | --- |
+| Orders, payments, refunds, settlements, bank-transactions, exceptions, webhook events | data, total, page, limit. |
+| Generic transactions | data and pagination containing total, page, limit. |
+| Actions | Bounded bare array; page/limit default to 1/100. |
+| Audit | Bare array; limit defaults to 50 and is capped at 100. |
+| Reconciliation runs | Latest 20 runs as a bare array. |
 
-**Request**
-```json
-{
-  "email": "user@example.com",
-  "password": "password"
-}
-```
+Payments support status, canonical method, search, from, and to. Settlements support status, ID/UTR search, from, and to. Exceptions support status, severity, type, and server-side search before pagination. Omitting status means all at API level; the UI chooses OPEN only when its URL has no status key.
 
-**Response**
-```json
-{
-  "access_token": "jwt-token",
-  "user": {
-    "id": "uuid",
-    "name": "Finance Admin",
-    "role": "ADMIN"
-  }
-}
-```
+Generic transactions accept type order/payment/refund/settlement/bank, default to payment, and validate the corresponding status and date bounds. Their date filter uses createdAt for every type, including settlement and bank. This differs from the dedicated settlements list, which filters settlementDate. Scoped detail reads return a detail object or 404; generic transaction details are not identical to the dedicated endpoint's record shape. Exception details expose latest-first aiAnalyses and eligiblePayments with internal id, paymentId, and remainingAmount. These are display hints; execution revalidates capacity. Timeline resolves display IDs and orders events by occurredAt.
 
-## 3. Webhooks
+Date bounds are inclusive instants. The shared parser does not expand a date-only to value to the end of that day. For an exact reporting interval, supply explicit timestamps with a timezone offset rather than assuming a whole-day range.
 
-### POST /webhooks/razorpay
+## Webhook and recovery contract
 
-Receives Razorpay webhook events.
+Send original JSON bytes with X-Razorpay-Signature and preferably X-Razorpay-Event-Id. A legacy root event_id is also supported; otherwise a body hash supplies stable identity.
 
-Authentication is performed using the Razorpay webhook signature rather than JWT.
+| Acknowledgement body | Meaning |
+| --- | --- |
+| status=accepted | Verified event is durably stored; queue recovery can repair immediate dispatch failure. |
+| status=ignored, reason=duplicate_event | Original work is preserved; this is not a new processing attempt. |
+| status=rejected, reason=invalid_signature | Diagnostic input is retained without financial ingestion. |
+| status=rejected, reason=stale_webhook | Clearly ancient event is retained as stale rather than queued. |
 
-**Required Header**
-- `X-Razorpay-Signature`
+A persistence failure is not an accepted event. HTTP 200 is the receiver's acknowledgement convention, so clients must inspect the body. Accepted does not mean worker completion, provider settlement, or exception clearance.
 
-**Processing**
+New entity ingestion requires a unique trusted merchant razorpayAccountId matching payload.account_id or a supported existing scoped relationship. Malformed metadata remains unknown diagnostic evidence. Verified unsupported shapes become UNSUPPORTED.
 
-```text
-Receive Request
-      ↓
-Read Raw Body
-      ↓
-Verify HMAC SHA256
-      ↓
-Persist Event
-      ↓
-Return 200
-      ↓
-Process Asynchronously
-```
+Automatic worker claims and dispatch share a 20-attempt ceiling. POST /webhooks/events/:id/retry allows FINANCE/ADMIN to reset/requeue eligible FAILED or expired work; it does not authorize processing invalid signatures or unrelated merchant events.
 
-**Responses**
+## Reconciliation and metrics
 
-Success:
-```json
-{
-  "status": "accepted"
-}
-```
+POST /reconciliation/run accepts optional dateFrom/dateTo with from <= to. A new synchronous run returns status=COMPLETED, runId, recordsProcessed, and exception counts after completion. Overlapping merchant work returns status=IN_PROGRESS, coalesced=true, and the existing runId. Failure retains a durable FAILED run.
 
-Invalid Signature:
-```json
-{
-  "error": {
-    "code": "INVALID_SIGNATURE",
-    "message": "Webhook signature verification failed"
-  }
-}
-```
+Reconciliation anchors use createdAt for orders/payments/refunds, settlementDate for settlements, and transactionDate for bank movements. They then expand through related evidence. A payment's capture timestamp is not its date-window anchor, and the window does not discard linked evidence outside it.
 
-## 4. Transactions
+Run history exposes status, timing, counts, capturedPayments, matchedPayments, and capturedVolume. Starting a run or listing history marks IN_PROGRESS runs older than five minutes as FAILED; this is not a background timeout. Coverage uses numerator/denominator from the same completed run, with zero for an empty denominator. Overall stats round the percentage to two decimals, use the latest completed full run, and expose snapshot_at. A date-filtered run cannot replace that overall snapshot.
 
-### GET /transactions
+Current total_transaction_volume is all-time captured volume, including refunded capture history. open_exceptions and critical_exceptions include OPEN/INVESTIGATING. resolved_today counts resolutions since midnight in the backend process's local timezone, rather than a per-merchant timezone; grouped severity/type counts use active exceptions.
 
-Returns paginated financial records.
+## Settlement membership import
 
-**Query Parameters**
-
-| Parameter | Description                               |
-|-----------|-------------------------------------------|
-| type      | order, payment, refund, settlement, bank  |
-| status    | Entity-specific status                    |
-| from      | Start date                                |
-| to        | End date                                  |
-| page      | Page number                               |
-| limit     | Page size                                 |
-
-**Response**
-```json
-{
-  "data": [],
-  "pagination": {
-    "page": 1,
-    "limit": 20,
-    "total": 100
-  }
-}
-```
-
-### GET /transactions/:id
-
-Returns a transaction and its related financial records.
+POST /settlements/:id/allocations atomically replaces explicit membership and its audit. FINANCE/ADMIN supplies 1-500 distinct captured merchant payments. Values use safe integer paise: refund/fee/tax are nonnegative; adjustment may be signed.
 
 ```json
 {
-  "id": "uuid",
-  "type": "payment",
-  "external_id": "pay_123",
-  "amount": 500000,
-  "currency": "INR",
-  "status": "CAPTURED",
-  "related": {
-    "order": {},
-    "refunds": [],
-    "settlement": {},
-    "bank_transaction": {}
-  }
-}
-```
-
-### GET /payments
-
-Paginated payments for the authenticated merchant. Backs the **Payments** tab of the Transactions page.
-
-**Query Parameters**
-
-| Parameter | Description |
-|-----------|-------------|
-| search    | Case-insensitive match on `paymentId` |
-| status    | `PaymentStatus` — CREATED, AUTHORIZED, CAPTURED, FAILED, PARTIALLY_REFUNDED, REFUNDED (unknown values ignored) |
-| method    | UPI, CARD, NETBANKING, WALLET |
-| from / to | Date range on `createdAt` |
-| page      | Page number (default 1) |
-| limit     | Page size (default 20, max 100) |
-
-Response uses the uniform list shape `{ data, total, page, limit }`; `amount` is an integer-paise string.
-
-### GET /payments/:id
-
-A single payment with its linked order and refunds.
-
-```json
-{
-  "id": "uuid",
-  "paymentId": "pay_123",
-  "amount": "500000",
-  "currency": "INR",
-  "status": "CAPTURED",
-  "method": "UPI",
-  "order": { "orderId": "order_123", "amount": "500000", "status": "PAID", "customerId": "cust_1" },
-  "refunds": [ { "refundId": "rfnd_1", "amount": "250000", "status": "PROCESSED", "createdAt": "..." } ]
-}
-```
-
-### GET /settlements
-
-Paginated settlements for the authenticated merchant. Backs the **Settlements** tab.
-
-**Query Parameters**
-
-| Parameter | Description |
-|-----------|-------------|
-| search    | Case-insensitive match on `settlementId` or `utr` |
-| status    | `SettlementStatus` — CREATED, PROCESSED, FAILED (unknown values ignored) |
-| from / to | Date range on `settlementDate` |
-| page      | Page number (default 1) |
-| limit     | Page size (default 20, max 100) |
-
-### GET /settlements/:id
-
-A single settlement with the bank transactions it covers.
-
-```json
-{
-  "id": "uuid",
-  "settlementId": "setl_123",
-  "amount": "1842300",
-  "status": "PROCESSED",
-  "utr": "UTR-DEMO-001",
-  "bankTransactions": [
-    { "bankTxnId": "btxn_1", "utr": "UTR-DEMO-001", "amount": "1842300", "transactionType": "CREDIT", "transactionDate": "...", "description": "...", "status": "..." }
-  ]
-}
-```
-
-> Bank-transaction `description` is untrusted text — rendered via `<PlainText>` in the UI, never interpolated into prompts or HTML.
-
-## 5. Reconciliation
-
-### GET /reconciliation/runs
-
-Returns reconciliation runs.
-
-### POST /reconciliation/runs
-
-Starts a reconciliation run.
-
-**Request**
-```json
-{
-  "date_from": "2026-09-01",
-  "date_to": "2026-09-03"
-}
-```
-
-**Response**
-```json
-{
-  "run_id": "uuid",
-  "status": "IN_PROGRESS"
-}
-```
-
-The run is asynchronous.
-
-### GET /reconciliation/runs/:id
-
-Returns reconciliation run details.
-
-```json
-{
-  "id": "uuid",
-  "status": "COMPLETED",
-  "total_records": 1000,
-  "matched_count": 982,
-  "exception_count": 18,
-  "started_at": "2026-09-03T10:00:00Z",
-  "finished_at": "2026-09-03T10:00:01Z"
-}
-```
-
-## 6. Exceptions
-
-### GET /exceptions
-
-Returns a filtered exception queue.
-
-**Query Parameters**
-
-| Parameter | Description                    |
-|-----------|--------------------------------|
-| type      | Exception type                 |
-| severity  | CRITICAL, HIGH, MEDIUM, LOW    |
-| status    | Exception status               |
-| from      | Start date                     |
-| to        | End date                       |
-| page      | Page                           |
-| limit     | Page size                      |
-
-### GET /exceptions/:id
-
-Returns complete exception information.
-
-```json
-{
-  "exception_id": "EXC-1024",
-  "type": "BANK_PAYMENT_MISMATCH",
-  "severity": "HIGH",
-  "status": "OPEN",
-  "expected_amount": 500000,
-  "actual_amount": 500000,
-  "difference_amount": 0,
-  "financial_impact": 500000,
-  "customer_impact": "HIGH",
-  "transactions": {},
-  "ai_analysis": {}
-}
-```
-
-### GET /exceptions/:id/timeline
-
-Returns chronological evidence.
-
-```json
-{
-  "events": [
+  "allocations": [
     {
-      "event_type": "payment.failed",
-      "timestamp": "2026-09-03T10:00:00Z",
-      "entity_type": "payment",
-      "entity_id": "uuid"
-    },
-    {
-      "event_type": "bank.credit",
-      "timestamp": "2026-09-03T10:02:00Z",
-      "entity_type": "bank_transaction",
-      "entity_id": "uuid"
+      "payment_id": "22222222-2222-4222-8222-222222222222",
+      "gross_amount": 10000,
+      "refund_amount": 0,
+      "fee_amount": 200,
+      "tax_amount": 36,
+      "adjustment_amount": 0
     }
   ]
 }
 ```
 
-## 7. AI Investigation
+The net sum must equal the settlement amount. Cross-batch capacity checks count allocations in other non-FAILED settlements; a failed batch does not hold gross/refund allocation capacity. Later zero-gross refund components are allowed without allocating the capture again; refund allocations must be backed by processed evidence across those non-failed batches. Coverage is stricter: only valid PROCESSED settlements contribute. An all-zero component is rejected. Response fields are settlementId, allocatedPayments, and netAmount. Example UUIDs are placeholders, not usable records.
 
-### POST /exceptions/:id/investigate
+## Actions and approvals
 
-Starts an AI investigation.
-
-**Response**
-```json
-{
-  "analysis_id": "uuid",
-  "status": "QUEUED"
-}
-```
-
-AI processing may happen asynchronously.
-
-### GET /exceptions/:id/ai-analysis
-
-Returns the latest AI investigation.
+POST /actions accepts an exception_id UUID, an action_type, and parameters. Types are REFUND, CREATE_PAYMENT_LINK, MARK_REVIEWED, and ESCALATE.
 
 ```json
 {
-  "summary": "Bank credit exists despite failed payment state.",
-  "likely_cause": "Payment state inconsistency.",
-  "confidence": 94,
-  "financial_exposure": 500000,
-  "customer_impact": "HIGH",
-  "recommended_action": "Verify the bank credit before resolution.",
-  "evidence_chain": [],
-  "next_steps": []
-}
-```
-
-## 8. AI Command Center
-
-### POST /ai/chat
-
-Processes natural-language finance queries.
-
-**Request**
-```json
-{
-  "message": "Show me high-value unresolved payment mismatches."
-}
-```
-
-**Response**
-```json
-{
-  "message": "I found 7 high-value unresolved payment mismatches.",
-  "results": [],
-  "suggested_actions": []
-}
-```
-
-The AI may retrieve data through read-only internal tools.
-
-## 9. Actions
-
-### POST /actions
-
-Creates an action proposal.
-
-```json
-{
-  "exception_id": "uuid",
+  "exception_id": "11111111-1111-4111-8111-111111111111",
   "action_type": "REFUND",
   "parameters": {
-    "amount": 500000,
-    "reason": "Duplicate payment"
+    "payment_id": "22222222-2222-4222-8222-222222222222",
+    "amount": 10000,
+    "reason": "Verified duplicate capture"
   }
 }
 ```
 
-**Response**
-```json
-{
-  "id": "uuid",
-  "status": "PENDING_APPROVAL",
-  "approval_required": true
-}
-```
+Refunds require a related captured payment; an ORDER-anchored duplicate requires explicit payment selection. Links require a related collectible order and remaining collection amount. The service resolves supported order references and protects the order against another active/unknown link across exception changes, including legacy rows. Disabled mode rejects new monetary intent before reservation.
 
-### GET /actions
+Canonical exception/type/parameters determine the server idempotency key. Authorized replay returns the existing action before consumed-balance checks. A changed reason creates a distinct action and cannot bypass shared capacity. Capacity subtracts CREATED, PROCESSING, and PROCESSED refund rows plus active action reservations. Pending refund rows hold capacity; they do not yet prove that reconciliation exposure has cleared. These calculations and final refund-state updates use the shared payment-row lock.
 
-Returns actions.
+The [approval table](../product/prd.md#actions-and-approval-defaults) applies to REFUND and CREATE_PAYMENT_LINK. Below 100,000 paise, policy auto-approval follows operator submission. Through 5,000,000 paise, one distinct ADMIN is required; above it, two. Requesters cannot approve themselves or vote twice. Approval/rejection requires a nonblank reason. FINANCE/ADMIN may reject; only ADMIN approves. The first of two votes leaves PENDING_APPROVAL.
 
-Query:
-```
-/actions?status=PENDING_APPROVAL
-```
+### Execution eligibility
 
-### POST /actions/:id/approve
+The current parent is locked/revalidated at execution claim. Monetary submission again checks current parent, claim token, and unexpired lease before recording externalSubmittedAt. A terminal parent before submission causes known FAILED nonexecution with audit. Already-submitted work retains uncertain-outcome recovery rules.
 
-Approves an eligible action.
+Responses expose actual status, including OUTCOME_UNKNOWN, and execution_mode/simulated metadata where applicable. Provider acceptance does not resolve the exception. Completion updates only current OPEN/INVESTIGATING parents; later RESOLVED/IGNORED metadata survives with ACTION_PARENT_STATE_PRESERVED audit.
 
-```json
-{
-  "reason": "Verified against bank statement."
-}
-```
+### Provider verification
 
-### POST /actions/:id/reject
+POST /actions/:id/recover requires ADMIN, provider_id, and a backend running in provider_test mode. The provider lookup is unavailable in simulation/disabled mode. It reads an existing test operation and verifies identity, target, amount, INR, and applicable provider evidence. It never submits another financial operation. Unknown outcomes retain protection until verified.
 
-Rejects an action.
+A COMPLETED CREATE_PAYMENT_LINK can also be refreshed. The supplied ID must match its stored provider ID. Confirmed cancelled/expired links become FAILED with retained evidence/creation timestamp and ACTION_PAYMENT_LINK_INACTIVE audit. A distinct replacement proposal may then pass current balance/uniqueness guards. Confirmed active links remain COMPLETED and protective.
 
-```json
-{
-  "reason": "Insufficient evidence."
-}
-```
+## AI
 
-## 10. Dashboard
+| Route | Contract |
+| --- | --- |
+| POST /ai/chat | 1-40 nonblank user/assistant turns, each <=8,000 characters; server owns system/tool roles. |
+| POST /ai/investigate/:id | Scoped UUID/EXC ID; returns the saved validated analysis and evidence metadata. |
+| GET /ai/config | Configured model and tool count for authenticated users. |
 
-### GET /dashboard/metrics
+Chat responses include message, tool_calls, tool_calls_made, suggested_actions, proposals, isFallback, and latencyMs. Every response requires audit persistence. Browser chat additionally limits encoded JSON to 90 KB.
 
-Returns operational metrics.
+Investigation responses expose summary, likelyCause/likely_cause, confidence, financialExposure, recommendedAction, evidenceChain, nextSteps, toolCalls, isFallback, latencyMs, model, and createdAt. Exposure is a decimal paise string; confidence is an integer 0-100. Analysis and audit commit together.
 
-```json
-{
-  "total_transaction_volume": 248000000,
-  "reconciliation_rate": 98.4,
-  "open_exceptions": 42,
-  "critical_exceptions": 3,
-  "pending_approvals": 5
-}
-```
+A successful structured analysis requires nonempty summary and likely_cause plus supplied confidence. Empty objects, malformed/incomplete output, or explicitly incomplete final responses use a controlled fallback. Disabled/unavailable AI remains auditable. Browser investigation timeout is 15 seconds and permits retry without proving provider cancellation.
 
-## 11. Error Contract
-
-All API errors follow the same structure.
-
-```json
-{
-  "error": {
-    "code": "RESOURCE_NOT_FOUND",
-    "message": "Exception was not found.",
-    "request_id": "req_123"
-  }
-}
-```
-
-### Common Error Codes
-
-| Code                | Meaning                                |
-|---------------------|----------------------------------------|
-| UNAUTHORIZED        | Authentication required                |
-| FORBIDDEN           | Insufficient permissions               |
-| VALIDATION_ERROR    | Invalid request                        |
-| RESOURCE_NOT_FOUND  | Resource unavailable                   |
-| INVALID_SIGNATURE   | Webhook signature failed               |
-| POLICY_DENIED       | Action violates policy                 |
-| ACTION_CONFLICT     | Action cannot be performed in current state |
-| INTERNAL_ERROR      | Unexpected server error                |
-
-## 12. Idempotency
-
-Financial mutation endpoints should support idempotency.
-
-Example:
-```
-Idempotency-Key: refund-exc-1024-v1
-```
-
-Repeated requests with the same key must not create duplicate financial actions.
-
-## 13. Rate Limiting
-
-Suggested MVP limits:
-- Standard API: 100 requests/minute/user
-- AI endpoints: configurable lower limit
-- Webhooks: higher provider-compatible limit
-
-Rate limits should be configurable through environment variables.
-
-## 14. API Design Principle
-
-The API separates:
-
-```text
-READ
- ↓
-INVESTIGATE
- ↓
-PROPOSE
- ↓
-APPROVE
- ↓
-EXECUTE
-```
-
-No single endpoint should allow an AI-generated instruction to bypass validation, policy, approval, or audit controls.
+See the [AI specification](ai-agent.md) for the 16 advisory/proposal tools and the [behavior contract](../architecture/behavior-contract.md) for shared invariants.

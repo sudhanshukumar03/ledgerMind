@@ -26,17 +26,17 @@ services:
       # without colliding with any other project holding host 6379. Inside the
       # compose network services still connect to `redis:6379`.
       - "127.0.0.1:6380:6379"
-    command: ["redis-server", "--appendonly", "no", "--save", "", "--requirepass", "${REDIS_PASSWORD:-krama_redis_secret}"]
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--requirepass", "${REDIS_PASSWORD:-learning-redis-password}"]
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-krama_redis_secret}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-learning-redis-password}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: ledgermind-backend
     restart: unless-stopped
     ports:
@@ -52,18 +52,22 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ledgermind}:${POSTGRES_PASSWORD:-ledgermind}@postgres:5432/${POSTGRES_DB:-ledgermind}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-krama_redis_secret}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-learning-redis-password}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
-      GROQ_API_KEY: ${GROQ_API_KEY}
-      AI_MODEL: ${AI_MODEL:-openai/gpt-oss-120b}
+      AI_ENABLED: ${AI_ENABLED:-false}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-llama-3.3-70b-versatile}
       RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
       RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
-      AUTO_APPROVE_BELOW_AMOUNT: ${AUTO_APPROVE_BELOW_AMOUNT:-1000}
       SWAGGER_ENABLED: "true"
-      SEED_DATABASE: "true"
+      SEED_DATABASE: ${SEED_DATABASE:-false}
+      ALLOW_DEMO_RESET: ${ALLOW_DEMO_RESET:-false}
+      DEMO_RESET_DATABASE: ${DEMO_RESET_DATABASE:-}
+      PAYMENT_EXECUTION_MODE: ${PAYMENT_EXECUTION_MODE:-disabled}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/api/v1/health || exit 1"]
       interval: 10s
@@ -73,11 +77,11 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api/v1}
-        NEXT_PUBLIC_AI_MODEL: ${NEXT_PUBLIC_AI_MODEL:-llama-3.3-70b-versatile}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+        API_UPSTREAM_URL: http://backend:3001/api/v1
     container_name: ledgermind-frontend
     restart: unless-stopped
     ports:
@@ -88,7 +92,7 @@ services:
     environment:
       PORT: 3000
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api/v1}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1"]
       interval: 10s

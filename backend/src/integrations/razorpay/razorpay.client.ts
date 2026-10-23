@@ -1,93 +1,58 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import Razorpay from 'razorpay';
+import { createHash, randomUUID } from 'node:crypto';
+
+export type ExecutionMode = 'disabled' | 'simulation' | 'provider_test';
 
 @Injectable()
 export class RazorpayClient {
-    private readonly logger = new Logger(RazorpayClient.name);
-    private readonly client: Razorpay | null;
+  readonly mode: ExecutionMode;
+  private readonly client: Razorpay | null;
 
-    constructor() {
-        const keyId = process.env.RAZORPAY_KEY_ID;
-        const keySecret = process.env.RAZORPAY_KEY_SECRET;
-        if (!keyId || !keySecret) {
-            this.logger.warn(
-                'RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET not set — ' +
-                'Razorpay actions are disabled. Set keys to enable payment execution.',
-            );
-            this.client = null;
-        } else {
-            this.client = new Razorpay({ key_id: keyId, key_secret: keySecret });
-        }
+  constructor() {
+    const mode = process.env.PAYMENT_EXECUTION_MODE || 'disabled';
+    if (!['disabled', 'simulation', 'provider_test'].includes(mode)) throw new Error('Invalid PAYMENT_EXECUTION_MODE');
+    this.mode = mode as ExecutionMode;
+    if (this.mode === 'provider_test') {
+      const key = process.env.RAZORPAY_KEY_ID;
+      const secret = process.env.RAZORPAY_KEY_SECRET;
+      if (!key?.startsWith('rzp_test_') || !secret) throw new Error('provider_test requires Razorpay test credentials');
+      this.client = new Razorpay({ key_id: key, key_secret: secret });
+    } else this.client = null;
+  }
+
+  async fetchOutcome(type: string, providerId: string): Promise<any> {
+    if (this.mode !== 'provider_test') throw new Error('Provider verification requires provider_test mode');
+    return type === 'REFUND' ? this.getClient().refunds.fetch(providerId) : this.getClient().paymentLink.fetch(providerId);
+  }
+
+  private simulationId(kind: string, operationId?: string) {
+    return `${kind}_sim_${createHash('sha256').update(operationId || randomUUID()).digest('hex').slice(0, 24)}`;
+  }
+
+  private getClient(): Razorpay {
+    if (!this.client) throw new Error('Payment execution is disabled; choose simulation or provider_test explicitly');
+    return this.client;
+  }
+
+  async createRefund(paymentId: string, amountInPaise?: number, operationId?: string) {
+    if (this.mode === 'simulation') return {
+      id: this.simulationId('rfnd', operationId), entity: 'refund', amount: amountInPaise ?? 0,
+      payment_id: paymentId, currency: 'INR', notes: { operation_id: operationId }, status: 'processed', simulated: true, execution_mode: this.mode,
+    };
+    return this.getClient().payments.refund(paymentId, { amount: amountInPaise, notes: { operation_id: operationId ?? '' }, receipt: operationId });
+  }
+
+  async createPaymentLink(orderId: string, amountInPaise: number, operationId?: string) {
+    if (this.mode === 'simulation') {
+      const id = this.simulationId('plink', operationId);
+      return {
+      id, entity: 'payment_link', amount: amountInPaise,
+      currency: 'INR', reference_id: operationId ?? orderId, status: 'created', simulated: true, execution_mode: this.mode,
+      short_url: `https://example.invalid/simulated-payment/${id}`,
+      };
     }
-
-    private getClient(): Razorpay {
-        if (!this.client) {
-            throw new Error(
-                'Razorpay is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env',
-            );
-        }
-        return this.client;
-    }
-
-    /**
-     * Determines whether a payment or order should run in gateway simulation mode.
-     * Evaluates to true if gateway credentials are not configured, or if test/sandbox IDs are provided.
-     */
-    private isSimulationMode(referenceId: string): boolean {
-        return !this.client || referenceId.startsWith('sim_') || referenceId.startsWith('test_') || referenceId.startsWith('mock_') || referenceId.includes('DEMO');
-    }
-
-    async createRefund(paymentId: string, amountInPaise?: number) {
-        if (this.isSimulationMode(paymentId)) {
-            this.logger.log(`[SIMULATION] Gateway refund simulated for payment: ${paymentId}`);
-            return {
-                id: `rfnd_sim_${Date.now()}`,
-                entity: 'refund',
-                amount: amountInPaise ?? 0,
-                payment_id: paymentId,
-                status: 'processed'
-            };
-        }
-
-        try {
-            const refund = await this.getClient().payments.refund(paymentId, {
-                amount: amountInPaise,
-            });
-            return refund;
-        } catch (error) {
-            this.logger.error('Razorpay refund failed', { paymentId, error });
-            throw error;
-        }
-    }
-
-    async createPaymentLink(orderId: string, amountInPaise: number) {
-        if (this.isSimulationMode(orderId)) {
-            this.logger.log(`[SIMULATION] Payment link simulated for order: ${orderId}`);
-            return {
-                id: `plink_sim_${Date.now()}`,
-                entity: 'payment_link',
-                amount: amountInPaise,
-                currency: 'INR',
-                reference_id: orderId,
-                status: 'created',
-                short_url: `https://rzp.io/i/sim_${orderId}`,
-            };
-        }
-
-        try {
-            const link = await this.getClient().paymentLink.create({
-                amount: amountInPaise,
-                currency: 'INR',
-                reference_id: orderId,
-                description: `Payment link for ${orderId}`,
-                customer: {
-                    name: "Customer",
-                }
-            });
-            return link;
-        } catch (error) {
-            this.logger.error('Razorpay payment link creation failed', { orderId, error });
-            throw error;
-        }
-    }
+    return this.getClient().paymentLink.create({ amount: amountInPaise, currency: 'INR', reference_id: operationId ?? orderId,
+      description: `Payment link for ${orderId}`, notes: { order_id: orderId, operation_id: operationId ?? '' }, customer: { name: 'Customer' } });
+  }
 }

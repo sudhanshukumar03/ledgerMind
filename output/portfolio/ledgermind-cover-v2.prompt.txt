@@ -1,0 +1,9 @@
+Edit this existing LedgerMind portfolio cover. Change ONLY the large cover header above the dashboard; preserve the entire dashboard, investigation panel, footer, background, dimensions, UI text, colors, data, shadows and composition.
+
+The header currently has a decorative thin teal vertical rule but no prominent brand icon. Remove that vertical rule. Add the ACTUAL LedgerMind symbol prominently to the left of the large "LedgerMind" wordmark, forming a beautifully aligned brand lockup.
+
+Exact brand symbol from the project's actual Logo.tsx SVG, not a new logo: three parallel horizontal strokes with rounded caps, dark teal #0F766E. Top stroke runs from (5.5,9) to (17.5,9), middle from (5.5,16) to (19,16), bottom from (5.5,23) to (17.5,23); stroke width 3.2. A solid bright teal #14B8A6 circle centered at (25.5,16), radius 3.6, sits to the right of the middle stroke. These coordinates describe the icon geometry before uniform enlargement. The three rounded ledger lines plus one separate dot are the existing logo, already visible in miniature in the dashboard top-left. Enlarge that same mark cleanly for the cover header. Do NOT use the alternate LM favicon, an abstract replacement, or an unrelated finance icon.
+
+Place the enlarged mark within the upper-left cover margin, optically centered beside the large wordmark with generous spacing. Slightly adjust the title size/position within the existing header if needed so the complete mark + wordmark lockup fits without clipping, remains dominant, and retains ample whitespace. Keep "Ledger" in deep ink and "Mind" in deep teal. Align the descriptor "AI-assisted financial reconciliation" beneath the wordmark. The actual logo should be immediately obvious at portfolio-thumbnail size.
+
+Do not change anything below the header. Preserve all current lettering exactly, with no typos, extra words, watermark or regenerated UI. Return the finished updated image.

@@ -1,3 +1,4 @@
+import { parsePagination, parseDateRange, requireUuid, parseEnum } from '../../common/utils/pagination.js';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 
@@ -6,6 +7,7 @@ export class RefundsService {
     constructor(private readonly prisma: PrismaService) { }
 
     async findAll(merchantId: string, page = 1, limit = 20) {
+        ({ page, limit } = parsePagination(page, limit));
         const skip = (page - 1) * limit;
         const [refunds, total] = await Promise.all([
             this.prisma.refund.findMany({
@@ -29,6 +31,7 @@ export class RefundsService {
     }
 
     async findOne(merchantId: string, id: string) {
+        requireUuid(id);
         const refund = await this.prisma.refund.findFirst({
             where: { id, merchantId },
             include: { payment: true },

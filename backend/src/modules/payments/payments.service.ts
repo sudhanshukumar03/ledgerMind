@@ -1,3 +1,4 @@
+import { parsePagination, parseDateRange, requireUuid, parseEnum } from '../../common/utils/pagination.js';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
@@ -12,19 +13,16 @@ export class PaymentsService {
         limit = 20,
         filters: { status?: string; method?: string; search?: string; from?: string; to?: string } = {},
     ) {
+        ({ page, limit } = parsePagination(page, limit));
         const skip = (page - 1) * limit;
 
         // Build a merchant-isolated WHERE clause with optional filters.
         const where: Prisma.PaymentWhereInput = { merchantId };
-        if (filters.status && filters.status in PaymentStatus) {
-            where.status = filters.status as PaymentStatus;
-        }
-        if (filters.method) where.method = filters.method;
+        where.status = parseEnum(filters.status, Object.values(PaymentStatus), 'status');
+        if (filters.method) where.method = filters.method.toLowerCase();
         if (filters.search) where.paymentId = { contains: filters.search, mode: 'insensitive' };
         if (filters.from || filters.to) {
-            const createdAt: Prisma.DateTimeFilter = {};
-            if (filters.from) createdAt.gte = new Date(filters.from);
-            if (filters.to) createdAt.lte = new Date(filters.to);
+            const createdAt = parseDateRange(filters.from, filters.to);
             where.createdAt = createdAt;
         }
 
@@ -50,6 +48,7 @@ export class PaymentsService {
     }
 
     async findOne(merchantId: string, id: string) {
+        requireUuid(id);
         const payment = await this.prisma.payment.findFirst({
             where: { id, merchantId },
             include: { order: true, refunds: true },

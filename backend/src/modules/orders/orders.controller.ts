@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query, Request, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { parsePagination } from '../../common/utils/pagination.js';
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
@@ -13,11 +14,8 @@ export class OrdersController {
         @Query('page') page?: string,
         @Query('limit') limit?: string,
     ) {
-        return this.ordersService.findAll(
-            req.user.merchantId,
-            page ? parseInt(page, 10) : 1,
-            limit ? parseInt(limit, 10) : 20,
-        );
+        const pagination = parsePagination(page, limit);
+        return this.ordersService.findAll(req.user.merchantId, pagination.page, pagination.limit);
     }
 
     @Get(':id')

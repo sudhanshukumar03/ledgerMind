@@ -1,0 +1,21 @@
+Use case: compositing / premium product portfolio cover.
+Create one finished, art-directed landscape portfolio hero image for the actual software project "LedgerMind". Aim for a high-resolution 16:10 editorial product case-study cover, exceptionally sharp and convincing, ready to share in a developer/designer portfolio.
+
+Inputs: Image 1 is LedgerMind's real dark dashboard screenshot, a supporting product/UI reference. Image 2 is its real dark investigation screenshot; use only the useful right-hand exception drawer as a supporting insert, not its blurred surrounding screen. Compose these into a completely new designed presentation. Preserve the recognizable LedgerMind identity, dark navy product surfaces, teal accents, sidebar navigation, dashboard financial cards and bar charts. Clean up screenshot artifacts, blue edge bloom, clipped currency characters, dev badges and empty black rectangles. Keep UI coherent and credible.
+
+Visual direction: sophisticated financial-software editorial design. A warm near-white, finely textured studio-paper canvas with deep ink typography. Deep navy interface windows and restrained teal accents derived from the source application. Precise Swiss-inspired grid, beautiful negative space, excellent kerning, optical alignment and substantial margins. Understated tactile shadows establish layers. No noisy gradients or generic technology imagery.
+
+Layout: Strong hierarchy: the project name and its concise description occupy the upper part with plenty of breathing room; a large, dominant dashboard showcase fills the main lower two-thirds. Give the dashboard a refined slim dark window frame, almost frontal with at most a subtle perspective, preserving readable tables and charts. An enlarged exception-investigation panel overlaps one corner of the dashboard and extends slightly above it, deliberately positioned so it does not hide the core financial metrics. The two UI layers should feel designed together, not pasted randomly. Use the investigation panel as the focal detail: clear discrepancy, exposure, evidence, and an operator review action. Quiet dark-emerald geometric registration details may anchor the layout, but the app is the subject.
+
+Exact principal cover text:
+"LedgerMind" — very large elegant bold sans serif, deep ink, correct spelling and capitalization.
+"AI-assisted financial reconciliation" — smaller, clean, readable descriptor.
+"RECONCILE / INVESTIGATE / REVIEW" — refined small all-caps footer line.
+"Next.js · NestJS · PostgreSQL · Redis" — small discreet technical footer, typeset consistently.
+Do not add marketing claims, achievement statistics, testimonials or extra slogans.
+
+Dashboard UI: faithful to the reference navigation and visual language, using clear labels "Dashboard", "Exceptions", "Actions", "AI Controller", "Reconciliation", "Transactions", "Audit". Main dashboard has "Active exceptions" with 11, "Captured volume" with "₹46.5K", "Coverage" with "78.4%", "Pending approvals" with 0. Supporting horizontal teal and muted coral charts, a small realistic recent-exceptions table. These are demonstration data, so add a tiny subdued "DEMO DATA" label within the window.
+
+Investigation panel: title "Bank payment mismatch", a restrained "CRITICAL" badge, "Exposure" and "₹50,000.00". Below, a compact evidence list with "Gateway payment: failed", "Bank credit: received", "Status: open". Include "AI investigation" as a small section title, an understated explanation "A bank credit exists for a payment marked failed.", and a clear teal "Mark for review" control. This is a portfolio presentation based on the app, not a claim of a literal unmodified screenshot. Keep all visible UI text legible, correctly spelled, and well aligned.
+
+Finish: premium portfolio-cover polish, strong design authorship and realistic software UI. Do not use Slack branding or chat-app layout, random floating icon tiles, fake laptops/phones, robots, brains, glowing orbs, sci-fi circuits, neon purple gradients, exaggerated glassmorphism, stock finance illustrations, watermarks, or busy decorative shapes. Avoid excessive small text. The output must be the completed image itself, not a slide template or a description.

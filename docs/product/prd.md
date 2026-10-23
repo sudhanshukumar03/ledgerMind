@@ -1,112 +1,78 @@
-# Product Requirements Document (PRD)
+# Product requirements
 
-## 1. Product Overview
+LedgerMind helps an operator understand why financial records disagree and decide what to do next. It is a learning project built around synthetic data, explicit simulation, and optional provider tests.
 
-**LedgerMind** (AI Finance Controller) is an event-driven payment reconciliation and exception resolution system designed for merchants using payment gateways like Razorpay. It provides a unified view of financial transactions, automatically detects discrepancies, and uses AI to assist in investigation and resolution.
+## Problem context
 
-## 2. Goals
+An order, payment, refund, settlement, and bank movement can describe different stages of the same financial event. Comparing individual rows is insufficient when captures split, settlements batch several payments, refunds arrive later, or events are duplicated and reordered.
 
-- Reduce time to identify and resolve reconciliation exceptions from days to minutes.
-- Provide clear explanations and actionable recommendations for every discrepancy.
-- Maintain a complete audit trail for compliance.
-- Seamlessly integrate with existing Razorpay APIs and bank data sources.
-- Offer a user-friendly dashboard for financial operations teams.
+The learning goal is to connect those records without inventing relationships, explain the remaining discrepancy, and retain the evidence behind a controlled resolution.
 
-## 3. User Personas
+## Scope and status
 
-- **Finance Manager**: Needs a high-level view of reconciliation health, exceptions, and team workload.
-- **Accountant/Reconciliation Specialist**: Investigates specific exceptions, needs detailed transaction timelines and AI suggestions.
-- **Business Owner**: Wants to know overall financial health, settlement trends, and risk exposure.
-- **Developer/Admin**: Configures integrations, policies, and monitors system health.
+The implemented application includes deterministic reconciliation, exception lifecycle, signed webhook processing, merchant-scoped queries, optional AI investigation/chat, governed actions, and an audit console. Current interfaces are defined by the [API](../specifications/api.md) and [database](../specifications/database.md) references. Tested cases are recorded in [verification](../operations/fix-verification.md).
 
-## 4. Functional Requirements
+Self-registration, SSO, policy settings, notifications, WebSockets, full transaction graphs, and automatic investigation in every path are outside the implemented scope.
 
-### 4.1 Data Ingestion
-- Receive webhooks from Razorpay for payment, refund, settlement events.
-- Ingest bank transaction data (synthetic or real) via file upload or API.
-- Normalize all incoming data into a canonical transaction format.
+## Functional targets
 
-### 4.2 Reconciliation
-- Match transactions across Orders, Payments, Refunds, Settlements, and Bank records.
-- Use multiple matching levels: exact IDs, UTR, amount, timestamp, metadata.
-- Produce a reconciliation run with matched and unmatched records.
-- Generate exceptions for unmatched or mismatched records.
+| Capability | Required behavior |
+| --- | --- |
+| Ingestion | Persist verified events and recoverable dispatch intent; preserve original work on duplicates; handle delayed and missing relationships. |
+| Reconciliation | Evaluate complete related order/capture/refund/batch/bank evidence with explicit deadlines and INR units. |
+| Exceptions | Maintain current facts, nonnegative exposure, evidence, operator decisions, clearance, and genuine recurrence. |
+| Investigation | Provide scoped facts and optional AI explanations with confidence, evidence, latency, and explicit fallback metadata. |
+| Actions | Validate related eligible targets, current balances, approval requirements, durable ownership, and recoverable external outcomes. |
+| Console | Distinguish loading, failure, empty results, stale responses, and actual mutation outcomes. |
+| Audit | Persist required AI and action decisions atomically with the associated local result. |
 
-### 4.3 Exception Management
-- Categorize exceptions (e.g., PAYMENT_MISSING, SETTLEMENT_AMOUNT_MISMATCH).
-- Assign severity based on financial impact, customer impact, age, confidence, and recurrence.
-- Provide a queue for operators to view and filter exceptions.
+## Actions and approval defaults
 
-### 4.4 AI Investigation
-- For each exception, the AI agent can:
-  - Gather related transactions.
-  - Compute financial exposure.
-  - Provide likely root cause with confidence score.
-  - Recommend next steps.
-- Expose natural language query interface for ad-hoc analysis.
+FINANCE and ADMIN can submit actions. VIEWER cannot submit financial or local action mutations. Monetary actions include REFUND and CREATE_PAYMENT_LINK; both use the implemented thresholds below.
 
-### 4.5 Action Engine
-- Support actions: request refund, create payment link, mark as reviewed, escalate.
-- Implement policy engine with approval thresholds.
-- Log all actions with before/after state.
+| Monetary amount in paise | Equivalent | Required approval |
+| --- | --- | --- |
+| 1-99,999 | Below INR 1,000 | Policy auto-approval after authorized operator submission. |
+| 100,000-5,000,000 | INR 1,000-INR 50,000 inclusive | One ADMIN distinct from the requester. |
+| Above 5,000,000 | Above INR 50,000 | Two distinct ADMINs, both distinct from the requester. |
 
-**Approval thresholds (authoritative — reference this table rather than duplicating numbers elsewhere):**
+An approver can vote once. FINANCE and ADMIN may reject pending requests. MARK_REVIEWED and ESCALATE are local actions and require authorized operator submission without monetary approval. For example, a 100,000-paise monetary request needs one ADMIN who is not the requester; a 5,000,001-paise request needs two different ADMINs.
 
-| Refund amount        | Approval required            |
-|-----------------------|-------------------------------|
-| < ₹1,000               | Auto-approved                |
-| ₹1,000 – ₹50,000       | Single human approval         |
-| > ₹50,000               | Dual approval (two approvers) |
+Amounts must be positive safe integer paise. Refunds require related captured evidence and available capacity; links require a related collectible order and remaining collection amount. Current parent eligibility is checked before execution and again at monetary submission. Unknown outcomes remain protected until verified; a new idempotency key is not safe recovery.
 
-These thresholds are enforced by the Policy Engine (see `../architecture/overview.md` Layer 6 and `AGENTS.md`) and are configurable via `AUTO_APPROVE_BELOW_AMOUNT` in `.env`. Non-refund actions (`create_payment_link`, `mark_reviewed`, `escalate`) do not carry a financial exposure and are auto-approved regardless of amount, unless a merchant-specific policy overrides this.
+## Requirements matrix
 
-### 4.6 Dashboard
-- Display KPIs: total volume, reconciled %, open exceptions, exception trends.
-- Exception queue with filters by type, severity, status.
-- Detailed exception view with transaction graph, AI analysis, and action buttons.
-- AI chat interface for natural language queries.
+| ID | Requirement | Reference |
+| --- | --- | --- |
+| FR-1 | Authenticate seeded users and derive merchant/role scope on the server. | [Security](../specifications/security.md#authentication-and-roles) |
+| FR-2 | Validate original webhook bytes, persist dispatch intent, and recover bounded owned processing. | [Webhook contract](../architecture/behavior-contract.md#webhooks) |
+| FR-3 | Reconcile complete related evidence, explicit batches, overdue states, and unexplained bank movements. | [Reconciliation](../architecture/overview.md#deterministic-reconciliation) |
+| FR-4 | Preserve exception lifecycle and same-run metrics under repeated or competing work. | [Lifecycle contract](../architecture/behavior-contract.md#reconciliation) |
+| FR-5 | Keep AI tools advisory and validate output before required analysis/audit persistence. | [AI specification](../specifications/ai-agent.md) |
+| FR-6 | Enforce target eligibility, capacity, distinct approvals, and durable execution recovery. | [Action API](../specifications/api.md#actions-and-approvals) |
+| FR-7 | Show scoped data, actionable errors, accurate units, and actual action status. | [Console workflows](#console-workflows) |
+| NFR-1 | Keep money as integer paise and timestamps as ISO-serialized UTC instants. | [Storage conventions](../specifications/database.md#storage-conventions) |
+| NFR-2 | Preserve records on ordinary restarts and guard destructive fixture/test operations. | [Local setup](../operations/local-development.md) |
+| NFR-3 | Verify rollback, races, leases, and recovery using real isolated PostgreSQL/Redis where needed. | [Testing](../operations/testing.md) |
+| NFR-4 | Keep secrets out of source, logs, and browser configuration. | [Secrets handling](../specifications/security.md#secrets-and-data-handling) |
 
-## 5. Non-Functional Requirements
+Broad append-only enforcement, complete change-history coverage, universal correlation, managed encryption, and production availability are future design topics; existing audit tables or infrastructure choices alone do not establish them.
 
-- **Performance**: Reconciliation of 10,000 transactions should complete in under 5 seconds.
-- **Scalability**: System should handle 100+ webhooks per second with horizontal scaling.
-- **Reliability**: 99.9% uptime; webhook processing must not lose events.
-- **Security**: All data encrypted in transit and at rest; role-based access; webhook signature verification.
-- **Auditability**: Every state change logged with user and reason.
+## Console workflows
 
-## 6. Out of Scope (for MVP)
+1. Initialize disposable learning data and sign in as ADMIN, FINANCE, or VIEWER. Registration is informational.
+2. As FINANCE or ADMIN, run reconciliation. All three roles can inspect the resulting exceptions and their linked evidence.
+3. Request AI investigation if configured. Review evidence and fallback metadata; treat the answer as advice.
+4. As FINANCE or ADMIN, select an eligible payment/order and submit an explicit proposal. Review the actual policy result and required approvals.
+5. Have the required distinct ADMINs approve, or let FINANCE/ADMIN reject. If an operation becomes OUTCOME_UNKNOWN, an ADMIN can verify the existing provider operation through recovery when the backend is in provider_test mode.
+6. Reconcile resulting financial evidence before considering the discrepancy cleared.
 
-- Real bank integrations (simulated only).
-- Full accounting system.
-- Multi-currency support (assume INR).
-- Machine learning model training (use pre-trained LLM).
+Exception search is server-side. The UI defaults to OPEN only when no status key exists; clearing status selects all. New entity selection must discard stale responses. Timeout must stop loading and allow retry. Details and action results must preserve exact paise, evidence provenance, and current status.
 
-## 7. Technology Stack
+## Benchmark exercises
 
-| Layer                 | Technology                                             | Why                                            |
-| ---------------------- | ------------------------------------------------------ | ----------------------------------------------- |
-| **Frontend**          | Next.js + TypeScript                                    | Fast dashboard development + strong ecosystem  |
-| **UI**                | Tailwind CSS + shadcn/ui                                 | Clean fintech-style interface                  |
-| **Charts**            | Recharts                                                 | Payment/reconciliation analytics               |
-| **Backend**           | Node.js + TypeScript                                     | Same language across the stack                 |
-| **API framework**     | NestJS                                                   | Structured architecture for a serious backend  |
-| **Database**          | PostgreSQL                                               | Reliable relational model for financial data   |
-| **ORM**               | Prisma                                                   | Type-safe DB access                            |
-| **Cache / queues**    | Redis + BullMQ                                            | Webhook/event processing and background jobs   |
-| **Payments**          | Razorpay Test APIs                                        | Core payment integration                       |
-| **Webhooks**          | Razorpay Webhooks                                          | Real-time payment-event ingestion              |
-| **AI**                | Groq API (LLaMA-3.3-70b-versatile)                         | Finance-controller reasoning + tool calling    |
-| **Agent framework**   | Native NestJS tool-calling orchestration layer              | Deterministic execution boundaries and type-safe guards |
-| **Authentication**    | JWT                                                          | Stateless merchant authentication              |
-| **Validation**        | Zod                                                        | Runtime/API validation                         |
-| **Testing**           | Jest + Supertest + Playwright                                | Backend + end-to-end testing                   |
-| **Containerization**  | Docker + Docker Compose                                      | Reproducible multi-stage container topology    |
-| **Deployment**        | Docker / Cloud Run / Kubernetes                              | Containerized production deployment            |
-| **Version control**   | Git + GitHub                                                 | Source control + collaboration                 |
+The following are unverified targets: persist/acknowledge webhooks within 200 ms, reconcile 1,000 representative records within two seconds, and load a local dashboard within one second. Record hardware, data distribution, queue depth, errors, and provider latency before comparing results. These targets are not an availability or throughput SLA.
 
-## 8. Success Metrics
+## Acceptance
 
-- 95% of exceptions correctly categorized.
-- AI root-cause accuracy > 85% on synthetic test cases.
-- Average exception resolution time reduced by 70%.
-- User satisfaction score ≥ 4.5/5 for the AI explanations.
+For each exercise, explain the invariant, demonstrate the failure, implement the correction, and verify relevant normal, boundary, duplicate, concurrent, delayed, and recovery cases. The [behavior contract](../architecture/behavior-contract.md) defines shared rules, and the [verification record](../operations/fix-verification.md) records completed evidence.

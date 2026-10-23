@@ -182,7 +182,7 @@ function StateDiff({ before, after }: { before: unknown; after: unknown }) {
   const META = {
     created: { label: 'Record created', fg: C.success, bg: C.successTint, icon: <FilePlus2 className="w-3.5 h-3.5" /> },
     removed: { label: 'Record removed', fg: C.critical, bg: C.criticalTint, icon: <FileX2 className="w-3.5 h-3.5" /> },
-    updated: { label: 'Record updated', fg: C.warning, bg: `${C.warning}22`, icon: <FilePen className="w-3.5 h-3.5" /> },
+    updated: { label: 'Record updated', fg: C.warning, bg: `color-mix(in srgb, ${C.warning} 13%, transparent)`, icon: <FilePen className="w-3.5 h-3.5" /> },
   }[kind];
 
   const mode: 'snapshot' | 'diff' = kind === 'updated' ? 'diff' : 'snapshot';
@@ -350,17 +350,19 @@ function DetailOverlay({ log, onClose }: { log: AuditLog; onClose: () => void })
 }
 
 export default function AuditPage() {
+  const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState<string | null>(null);
 
   const load = useCallback(() => {
+    setError(null);
     setLoading(true);
     auditApi
       .list({ limit: 100 })
       .then((r) => setLogs(r.data))
-      .catch(() => setLogs([]))
+      .catch(() => setError('Unable to load audit events. Refresh to retry.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -382,6 +384,7 @@ export default function AuditPage() {
   );
   return (
     <div>
+      {error && <p role="alert" className="p-4" style={{ color: C.critical }}>{error}</p>}
       <Header title="Audit Trail" action={refreshBtn} />
 
       <div className="p-6">
@@ -408,7 +411,7 @@ export default function AuditPage() {
                     <Loader2 className="w-5 h-5 animate-spin mx-auto" style={{ color: C.textMuted }} />
                   </td>
                 </tr>
-              ) : logs.length === 0 ? (
+              ) : error ? (<tr><td colSpan={6}>Audit data is unavailable.</td></tr>) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-16 text-center text-[13px]" style={{ color: C.textMuted }}>
                     No audit records yet.

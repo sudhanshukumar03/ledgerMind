@@ -14,7 +14,7 @@ export function Header({ title, action }: HeaderProps) {
   return (
     <header
       className="grid grid-cols-3 items-center gap-4 px-8 h-[64px] shrink-0 sticky top-0 z-10 backdrop-blur-xl"
-      style={{ backgroundColor: `${C.surface}E6`, borderBottom: `1px solid ${C.border}` }}
+      style={{ backgroundColor: `color-mix(in srgb, ${C.surface} 90%, transparent)`, borderBottom: `1px solid ${C.border}` }}
     >
       <h1
         className="text-[18px] font-semibold m-0 leading-none whitespace-nowrap col-start-1 justify-self-start"

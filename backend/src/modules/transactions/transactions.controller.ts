@@ -1,7 +1,7 @@
 import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { TransactionsService } from './transactions.service.js';
 import { ListTransactionsDto } from './dto/list-transactions.dto.js';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 
 @Controller('transactions')

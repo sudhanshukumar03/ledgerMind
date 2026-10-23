@@ -37,7 +37,7 @@ import type {
 
 export * from './types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -57,9 +57,12 @@ api.interceptors.request.use((config) => {
 let isRedirecting = false;
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    if (typeof window !== 'undefined' && res.config.method === 'get' && !res.config.url?.startsWith('/auth')) window.dispatchEvent(new Event('ledgermind:data-updated'));
+    return res;
+  },
   (err) => {
-    if (err.response?.status === 401 && typeof window !== 'undefined' && !isRedirecting) {
+    if (err.response?.status === 401 && !err.config?.url?.startsWith('/auth/') && typeof window !== 'undefined' && !isRedirecting) {
       isRedirecting = true;
       localStorage.removeItem('lm_token');
       localStorage.removeItem('lm_user');
@@ -82,10 +85,10 @@ export const dashboardApi = {
 
 // ─── Exceptions ───────────────────────────────────────────────────────────────
 export const exceptionsApi = {
-  list: (params?: { status?: string; severity?: string; page?: number; limit?: number }) =>
+  list: (params?: { status?: string; severity?: string; type?: string; search?: string; page?: number; limit?: number }) =>
     api.get<PaginatedResponse<Exception>>('/exceptions', { params }),
-  get: (id: string) => api.get<Exception>(`/exceptions/${id}`),
-  investigate: (id: string) => api.post<AiAnalysis>(`/ai/investigate/${id}`),
+  get: (id: string, signal?: AbortSignal) => api.get<Exception>(`/exceptions/${id}`, { signal }),
+  investigate: (id: string, signal?: AbortSignal) => api.post<AiAnalysis>(`/ai/investigate/${id}`, {}, { signal }),
 };
 
 // ─── Reconciliation ───────────────────────────────────────────────────────────
@@ -115,6 +118,7 @@ export const actionsApi = {
         ...(payload.order_id && { order_id: payload.order_id }),
       },
     }),
+  recover: (id: string, provider_id: string) => api.post<Action>(`/actions/${id}/recover`, { provider_id }),
   approve: (id: string, reason?: string) =>
     api.post<Action>(`/actions/${id}/approve`, { reason: reason ?? 'Approved' }),
   reject: (id: string, reason: string) =>
@@ -122,9 +126,18 @@ export const actionsApi = {
 };
 
 // ─── AI Chat ─────────────────────────────────────────────────────────────────
+// Keep the wire payload below the API's 100 KB JSON limit as well as the
+// turn/content caps. Measure encoded JSON because escaping/Unicode add bytes.
+export function boundChatMessages(messages: ChatMessage[]): ChatMessage[] {
+  const history = messages.filter(m => m.content.trim()).slice(-40).map(m => ({ ...m, content: m.content.slice(0, 8000) }));
+  const encoder = new TextEncoder();
+  while (history.length > 1 && encoder.encode(JSON.stringify({ messages: history })).byteLength > 90000) history.shift();
+  return history;
+}
+
 export const aiApi = {
   chat: (messages: ChatMessage[]) =>
-    api.post<ChatResponse>('/ai/chat', { messages }),
+    api.post<ChatResponse>('/ai/chat', { messages: boundChatMessages(messages) }),
   getConfig: () => api.get<{ model: string; toolCount: number }>('/ai/config'),
 };
 
@@ -137,8 +150,8 @@ export const transactionsApi = {
     api.get<PaginatedResponse<Payment>>('/payments', { params }),
   listSettlements: (params?: SettlementFilters) =>
     api.get<PaginatedResponse<Settlement>>('/settlements', { params }),
-  getPayment: (id: string) => api.get<PaymentDetail>(`/payments/${id}`),
-  getSettlement: (id: string) => api.get<SettlementDetail>(`/settlements/${id}`),
+  getPayment: (id: string, signal?: AbortSignal) => api.get<PaymentDetail>(`/payments/${id}`, { signal }),
+  getSettlement: (id: string, signal?: AbortSignal) => api.get<SettlementDetail>(`/settlements/${id}`, { signal }),
 };
 
 // ─── Webhooks ────────────────────────────────────────────────────────────────

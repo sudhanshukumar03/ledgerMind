@@ -1,3 +1,4 @@
+import { parsePagination, parseDateRange, requireUuid, parseEnum } from '../../common/utils/pagination.js';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 
@@ -6,6 +7,7 @@ export class OrdersService {
     constructor(private readonly prisma: PrismaService) { }
 
     async findAll(merchantId: string, page = 1, limit = 20) {
+        ({ page, limit } = parsePagination(page, limit));
         const skip = (page - 1) * limit;
         const [orders, total] = await Promise.all([
             this.prisma.order.findMany({
@@ -30,6 +32,7 @@ export class OrdersService {
     }
 
     async findOne(merchantId: string, id: string) {
+        requireUuid(id);
         const order = await this.prisma.order.findFirst({
             where: { id, merchantId },
             include: { payments: true },

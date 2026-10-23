@@ -1,0 +1,33 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { source } = require('./source-loader.cjs');
+async function main() {
+  const { TransactionsService } = source('backend/src/modules/transactions/transactions.service.ts');
+  const service = new TransactionsService({});
+  assert.equal(service.serializeBigInt({ at: new Date('2026-10-21T00:00:00Z'), amount: 9007199254740993n }).at, '2026-10-21T00:00:00.000Z');
+  assert.equal(service.serializeBigInt({ amount: 9007199254740993n }).amount, '9007199254740993');
+  const { formatValue, isMoney } = source('frontend/lib/humanize.ts');
+  assert.equal(formatValue('totalRecords', 400), '400');
+  assert.equal(isMoney('refundCount', 400), false);
+  assert.equal(formatValue('amount', '9007199254740993'), '\u20b99,00,71,99,25,47,409.93');
+  const { Amount } = source('frontend/components/ui/Amount.tsx');
+  const { renderToStaticMarkup } = require('react-dom/server');
+  assert.ok(renderToStaticMarkup(Amount({ value: '9007199254740993' })).includes('\u20b99,00,71,99,25,47,409.93'));
+  assert.ok(!renderToStaticMarkup(Amount({ value: Number.MAX_SAFE_INTEGER + 1 })).includes('\u20b9'));
+  const payloads = [];
+  const api = { interceptors: { request: { use() {} }, response: { use() {} } }, post: async (url, body) => payloads.push({ url, body }) };
+  const client = source('frontend/lib/api-client.ts', { axios: { create: () => api } });
+  await client.aiApi.chat(Array.from({ length: 45 }, () => ({ role: 'user', content: 'a'.repeat(9000) })));
+  assert.ok(payloads[0].body.messages.length <= 40);
+  assert.ok(new TextEncoder().encode(JSON.stringify(payloads[0].body)).length <= 90000);
+  assert.equal(client.boundChatMessages(Array.from({length: 45}, () => ({role: "user", content: "short"}))).length, 40);
+  const escaped = client.boundChatMessages(Array.from({length: 40}, () => ({role: "user", content: "\u0000".repeat(8000)})));
+  assert.ok(new TextEncoder().encode(JSON.stringify({messages: escaped})).length <= 90000); assert.ok(payloads[0].body.messages.every(m => m.content.length === 8000));
+  const { parseDateRange, parsePagination } = source('backend/src/common/utils/pagination.ts');
+  assert.throws(() => parseDateRange('2026-10-22', '2026-10-21'));
+  assert.throws(() => parsePagination(1e15, 100));
+  for (const file of ['frontend/components/layout/Header.tsx', 'frontend/components/approvals/ActionModal.tsx']) assert.ok(!/\$\{C\.\w+\}[a-fA-F0-9]{2}/.test(fs.readFileSync(file, 'utf8')));
+  console.log('PASS offline contracts: exact paise, count units, Date serialization, bounded chat, range/pagination, valid CSS alpha');
+}
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { main };

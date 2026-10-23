@@ -1,3 +1,4 @@
+import { parsePagination } from '../../common/utils/pagination.js';
 import { Controller, Get, Post, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ActionsService } from './actions.service.js';
 import { CreateActionDto } from './dto/create-action.dto.js';
@@ -27,8 +28,9 @@ export class ActionsController {
     @ApiOperation({ summary: 'List actions with optional status filter' })
     @ApiQuery({ name: 'status', enum: ActionStatus, required: false, description: 'Filter by action status' })
     @ApiResponse({ status: 200, description: 'Return a list of actions.' })
-    async getActions(@Request() req: any, @Query('status') status?: ActionStatus) {
-        return this.actionsService.getActions(req.user.merchantId, status);
+    async getActions(@Request() req: any, @Query('status') status?: ActionStatus, @Query('page') page?: string, @Query('limit') limit?: string) {
+        const pagination = parsePagination(page, limit ?? '100');
+        return this.actionsService.getActions(req.user.merchantId, status, pagination.page, pagination.limit);
     }
 
     @Post(':id/approve')
@@ -44,6 +46,11 @@ export class ActionsController {
         @Body() approveActionDto: ApproveActionDto,
     ) {
         return this.actionsService.approveAction(id, req.user.userId, req.user.merchantId, approveActionDto);
+    }
+
+    @Post(':id/recover')
+    async recoverOutcome(@Param('id') id: string, @Request() req: any, @Body() body: { provider_id: string }) {
+        return this.actionsService.recoverOutcome(id, req.user.userId, req.user.merchantId, body.provider_id);
     }
 
     @Post(':id/reject')

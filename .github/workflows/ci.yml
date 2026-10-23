@@ -1,7 +1,6 @@
 name: CI
 
-# WS4 CI gate (see docs/17-HARDENING-ROADMAP.md).
-# Runs backend unit + e2e and the frontend build on every PR to main.
+# Synthetic regression gates; no external AI/payment calls are required.
 on:
   pull_request:
     branches: [main]
@@ -24,15 +23,18 @@ jobs:
       # shorter at bootstrap (src/app.module.ts). A throwaway CI value, not a secret.
       JWT_SECRET: ci_test_jwt_secret_minimum_32_chars_long
       NODE_ENV: test
+      AI_ENABLED: 'false'
+      PAYMENT_EXECUTION_MODE: disabled
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npx prisma generate
+      - run: node ../scripts/verify-tooling.cjs
       # --runInBand: ts-jest workers are memory-hungry; parallel workers OOM.
       - run: npm run test:unit -- --runInBand
 
@@ -43,6 +45,7 @@ jobs:
       run:
         working-directory: backend
     env:
+      TEST_ALLOW_DATABASE_RESET: 'true'
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ledgermind_test
       REDIS_HOST: localhost
       REDIS_PORT: '6379'
@@ -50,13 +53,15 @@ jobs:
       JWT_SECRET: ci_test_jwt_secret_minimum_32_chars_long
       RAZORPAY_WEBHOOK_SECRET: test_secret
       NODE_ENV: test
+      AI_ENABLED: 'false'
+      PAYMENT_EXECUTION_MODE: disabled
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # Docker Hub's unauthenticated pull rate limit is too tight for the
       # services: block, which pulls images outside of any authenticated
@@ -88,7 +93,7 @@ jobs:
       - name: Wait for services
         run: |
           for i in $(seq 1 30); do
-            if docker exec ledgermind-postgres pg_isready -U postgres 2>/dev/null; then break; fi
+            if docker exec ledgermind-postgres pg_isready -h 127.0.0.1 -U postgres 2>/dev/null; then break; fi
             sleep 1
           done
 
@@ -97,7 +102,7 @@ jobs:
             sleep 1
           done
 
-          docker exec ledgermind-postgres pg_isready -U postgres
+          docker exec ledgermind-postgres pg_isready -h 127.0.0.1 -U postgres
           docker exec ledgermind-redis redis-cli ping
 
       - run: npm ci
@@ -108,6 +113,9 @@ jobs:
       # don't tear down; without it Jest hangs after the last test and the job
       # would run until timeout. --runInBand for the same OOM reason as unit.
       - run: npm run test:e2e -- --runInBand --forceExit
+      - run: npm run build
+      - name: Quality follow-up acceptance (Q1-Q5)
+        run: node ../scripts/review-quality.mjs
 
       - name: Cleanup containers
         if: always()
@@ -115,8 +123,13 @@ jobs:
           docker rm -f ledgermind-postgres ledgermind-redis 2>/dev/null || true
 
   frontend-build:
-    name: Frontend build
+    name: Frontend build and browser regressions
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        api-prefix: ['/api', '/api/v1']
+    env:
+      NEXT_PUBLIC_API_URL: ${{ matrix.api-prefix }}
     defaults:
       run:
         working-directory: frontend
@@ -126,12 +139,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run build
-
-  # TODO (WS4): full-stack Playwright e2e. The frontend specs
-  # (e2e/dashboard, e2e/exceptions, + transactions once written) need the
-  # Next.js app AND the NestJS API AND a seeded Postgres running together.
-  # Wiring that orchestration is a follow-up — tracked in
-  # docs/17-HARDENING-ROADMAP.md WS4, not part of this first cut.
+      - name: Prepare standalone browser server
+        run: |
+          cp -r .next/static .next/standalone/frontend/.next/
+          cp -r public .next/standalone/frontend/
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- --workers=1 --reporter=line
+      - name: Offline contracts and documentation
+        working-directory: .
+        run: |
+          node scripts/verify-contracts.cjs
+          python scripts/check_docs.py

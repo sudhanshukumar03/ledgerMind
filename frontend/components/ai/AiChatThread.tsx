@@ -88,7 +88,7 @@ export function AiChatThread({ exceptionId, label, initialAnalysis }: { exceptio
 
               <div>
                 <p className="text-[11px] uppercase tracking-wide mb-1 font-semibold" style={{ color: C.textMuted }}>Recommended Action</p>
-                <div className="inline-block px-3 py-1.5 text-[12px] font-semibold border rounded-md" style={{ backgroundColor: C.infoTint, borderColor: `${C.info}40`, color: C.info }}>
+                <div className="inline-block px-3 py-1.5 text-[12px] font-semibold border rounded-md" style={{ backgroundColor: C.infoTint, borderColor: `color-mix(in srgb, ${C.info} 25%, transparent)`, color: C.info }}>
                   <AiMarkdown content={analysis.recommendedAction} />
                 </div>
               </div>

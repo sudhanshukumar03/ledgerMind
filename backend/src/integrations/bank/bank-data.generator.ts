@@ -110,7 +110,7 @@ export class BankDataGenerator {
     for (let i = 0; i < count; i++) {
       const amt = randAmount();
       const utr = `UTR-GEN-CLEAN-${uid('u')}`;
-      const settlementId = uid('c');
+      const settlementId = randomUUID();
       const when = hoursAgo(randInt(48, 120));
 
       await this.prisma.settlement.create({
@@ -125,6 +125,9 @@ export class BankDataGenerator {
           createdAt: when,
         },
       });
+
+      const payment = await this.prisma.payment.create({ data: { paymentId: uid('pay'), merchantId, amount: amt, status: 'CAPTURED', capturedAt: when, createdAt: when } });
+      await this.prisma.settlementAllocation.create({ data: { settlementId, paymentId: payment.id, grossAmount: amt } });
 
       await this.prisma.bankTransaction.create({
         data: {
@@ -152,7 +155,7 @@ export class BankDataGenerator {
     const settlementAmt = rupees(15_000);
     const bankAmt = rupees(14_600); // ₹400 short
     const utr = `UTR-GEN-MISMATCH-${uid('u')}`;
-    const settlementId = uid('c');
+    const settlementId = randomUUID();
 
     await this.prisma.settlement.create({
       data: {
@@ -213,8 +216,8 @@ export class BankDataGenerator {
     console.log('  [4] bank credit against a FAILED payment');
     const amt = rupees(randInt(5_000, 30_000));
     const utr = `UTR-GEN-FAILPAY-${uid('u')}`;
-    const orderId = uid('ord');
-    const paymentId = uid('pay');
+    const orderId = randomUUID();
+    const paymentId = randomUUID();
 
     await this.prisma.order.create({
       data: {
@@ -246,6 +249,7 @@ export class BankDataGenerator {
       data: {
         bankTxnId: uid('bank'),
         merchantId,
+        paymentId,
         utr,
         amount: amt,
         transactionType: BankTransactionType.CREDIT,
@@ -264,8 +268,8 @@ export class BankDataGenerator {
   private async generateRefundDelayScenario(merchantId: string): Promise<void> {
     console.log('  [5] refund delay (PROCESSING >30h, no bank debit)');
     const amt = rupees(randInt(1_000, 8_000));
-    const orderId = uid('ord');
-    const paymentRowId = uid('pay');
+    const orderId = randomUUID();
+    const paymentRowId = randomUUID();
 
     await this.prisma.order.create({
       data: {
@@ -314,7 +318,7 @@ export class BankDataGenerator {
   private async generateDuplicatePaymentScenario(merchantId: string): Promise<void> {
     console.log('  [6] duplicate CAPTURED payments on same order');
     const amt = rupees(randInt(1_500, 6_000));
-    const orderId = uid('ord');
+    const orderId = randomUUID();
 
     await this.prisma.order.create({
       data: {
@@ -331,7 +335,7 @@ export class BankDataGenerator {
     // createMany does not guarantee UUID uniqueness from uid(), so create sequentially
     await this.prisma.payment.create({
       data: {
-        id: uid('pay'),
+        id: randomUUID(),
         paymentId: uid('pay_rz'),
         merchantId,
         orderId,
@@ -345,7 +349,7 @@ export class BankDataGenerator {
 
     await this.prisma.payment.create({
       data: {
-        id: uid('pay'),
+        id: randomUUID(),
         paymentId: uid('pay_rz'),
         merchantId,
         orderId,
@@ -366,7 +370,7 @@ export class BankDataGenerator {
     console.log('  [7] duplicate bank credit (same UTR × 2)');
     const amt = rupees(randInt(2_000, 10_000));
     const utr = `UTR-GEN-DUP-${uid('u')}`;
-    const settlementId = uid('c');
+    const settlementId = randomUUID();
 
     await this.prisma.settlement.create({
       data: {

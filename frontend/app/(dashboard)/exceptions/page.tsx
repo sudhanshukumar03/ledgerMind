@@ -25,6 +25,7 @@ function ExceptionsList() {
   const statusFilter = searchParams.get('status') ?? 'OPEN';
   const severityFilter = searchParams.get('severity') ?? '';
   const search = searchParams.get('search') ?? '';
+  const typeFilter = searchParams.get('type') ?? '';
 
   const [popover, setPopover] = useState<{ open: boolean; anchorEl: HTMLElement | null; exception: Exception | null }>({
     open: false,
@@ -39,7 +40,7 @@ function ExceptionsList() {
     const params = new URLSearchParams(searchParams.toString());
     if (updates.status !== undefined) {
       if (updates.status) params.set('status', updates.status);
-      else params.delete('status');
+      else params.set('status', '');
       if (updates.page === undefined) params.set('page', '1');
     }
     if (updates.severity !== undefined) {
@@ -59,9 +60,9 @@ function ExceptionsList() {
     router.push(`/exceptions?${params.toString()}`);
   };
 
-  const { data: response, isLoading: loading } = useSWR(
-    ['exceptions', statusFilter, severityFilter, pageFilter],
-    () => exceptionsApi.list({ status: statusFilter || undefined, severity: severityFilter || undefined, limit: 20, page: pageFilter })
+  const { data: response, isLoading: loading, error } = useSWR(
+    ['exceptions', statusFilter, severityFilter, pageFilter, search, typeFilter],
+    () => exceptionsApi.list({ status: statusFilter || undefined, severity: severityFilter || undefined, limit: 20, page: pageFilter, search: search || undefined, type: typeFilter || undefined })
             .then(r => r.data),
     { fallbackData: { data: [], total: 0, page: 1, limit: 20 } }
   );
@@ -70,11 +71,7 @@ function ExceptionsList() {
   const total = response?.total || 0;
   const totalPages = Math.max(1, Math.ceil(total / 20));
 
-  const filtered = exceptions.filter(e =>
-    !search ||
-    e.exceptionId.toLowerCase().includes(search.toLowerCase()) ||
-    e.type.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = exceptions;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -133,6 +130,7 @@ function ExceptionsList() {
           onClearAll={() => updateFilters({ status: '', severity: '' })}
         />
 
+        {error && <p role="alert" style={{ color: C.critical }}>Unable to load exceptions. Retry by refreshing the page.</p>}
         {/* Table */}
         <div className="card flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-auto">
@@ -159,7 +157,7 @@ function ExceptionsList() {
                       <td className="px-4 py-3 text-right"><Skeleton className="h-8 w-8 ml-auto" /></td>
                     </tr>
                   ))
-                ) : filtered.length === 0 ? (
+                ) : error ? (<tr><td colSpan={6}>Exception data is unavailable.</td></tr>) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-12 text-[13px]" style={{ color: C.textMuted }}>
                       No exceptions found

@@ -21,7 +21,7 @@ fi
 
 if [ "$SEED_DATABASE" = "true" ]; then
   echo "🌱 [LedgerMind Backend] Seeding demo database..."
-  npm run prisma:seed || echo "⚠️ Seeding step completed with warning."
+  npm run prisma:seed
 fi
 
 echo "✨ [LedgerMind Backend] Launching NestJS on port ${PORT:-3001}..."

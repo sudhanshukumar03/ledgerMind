@@ -1,43 +1,26 @@
-# LedgerMind Documentation
+# Documentation guide
 
-Welcome to the LedgerMind architecture, design, and operations documentation suite.
+The documentation is organized around one reference per topic. Start with [local development](operations/local-development.md), then read the [behavior contract](architecture/behavior-contract.md) while exploring the source.
 
----
+## Read by purpose
 
-## 🏛️ Architecture
-Core system design, topology, and matching models.
+| Purpose | Reference |
+| --- | --- |
+| Understand components, reconciliation, states, and design tradeoffs | [Architecture guide](architecture/overview.md) |
+| Follow system and lifecycle flows visually | [Architecture diagrams](architecture/diagrams.md) |
+| Check shared financial, approval, and recovery rules | [Behavior contract](architecture/behavior-contract.md) |
+| Understand scope, operator workflows, and learning requirements | [Product requirements](product/prd.md) |
+| Integrate with routes, payloads, and response shapes | [API reference](specifications/api.md) |
+| Inspect current model fields, enums, and relationships | [Database reference](specifications/database.md) |
+| Understand the AI tool catalogue and advisory boundary | [AI specification](specifications/ai-agent.md) |
+| Check authentication, isolation, secrets, and known control limits | [Security boundaries](specifications/security.md) |
+| Configure environments, services, providers, and upgrades | [Local development](operations/local-development.md) |
+| Run isolated checks and maintain dependencies/docs | [Testing and maintenance](operations/testing.md) |
+| Review dated completed checks and per-finding closure | [Verification record](operations/fix-verification.md) |
+| Study original pre-fix symptoms and repair directions | [Historical audit](operations/full-code-audit-2026-10-21.md) |
 
-- **[System Architecture](architecture/overview.md)** — Module boundaries, BullMQ worker queues, and deployment topology.
-- **[Architecture Diagrams](architecture/diagrams.md)** — Flowcharts, sequence diagrams, and transaction lifecycles.
-- **[Reconciliation Engine](architecture/reconciliation.md)** — The 3-way matching ladder, multi-criteria heuristics, and exposure scoring.
-- **[Payment State Machines](architecture/state-machines.md)** — Formal state transition rules for payments, orders, and settlements.
-- **[Design Concepts](architecture/design-concepts.md)** — Idempotency invariants, integer minor-unit math, and fault isolation principles.
+The [root README](../README.md) introduces the project, [TODO.md](../TODO.md) tracks optional exercises, and [AGENTS.md](../AGENTS.md) describes AI/policy/audit responsibilities.
 
----
+## How to interpret claims
 
-## 📋 Specifications
-Formal contracts, interfaces, and safety guarantees.
-
-- **[API Specification](specifications/api.md)** — REST API contracts, request/response schemas, and error codes.
-- **[Database Schema](specifications/database.md)** — Prisma schema models, indexing strategies, and tenant partitioning.
-- **[AI Agent Specification](specifications/ai-agent.md)** — AI Finance Controller tools, system prompt versioning, and policy engine fences.
-- **[Security & Multi-Tenancy](specifications/security.md)** — JWT authentication, RBAC authorization, and tenant isolation guards.
-
----
-
-## 🎯 Product & Requirements
-Problem framing, business requirements, and operational workflows.
-
-- **[Problem Statement](product/problem.md)** — Background on financial reconciliation challenges and manual investigation costs.
-- **[Product Requirements (PRD)](product/prd.md)** — Core features, persona definitions, and acceptance criteria.
-- **[Requirements Matrix](product/requirements.md)** — Functional and non-functional requirements breakdown.
-- **[User Flows](product/user-flows.md)** — Finance operator and controller triage journeys.
-
----
-
-## ⚙️ Operations & Guides
-Operational runbooks, quality assurance, and runtime troubleshooting.
-
-- **[Testing & QA Plan](operations/testing.md)** — Unit test coverage, integration tests, and Playwright verification.
-- **[Error Handling Taxonomy](operations/error-handling.md)** — Backend exception taxonomy and UI fault states.
-- **[Groq AI Setup](operations/groq-setup.md)** — Groq LLaMA-3.3-70b configuration, latency metrics, and API verification.
+Use the API and database references when you need exact names and formats. Use the architecture and product guides when you want to understand why a rule exists. Historical audit symptoms describe the pre-fix snapshot, while the verification record states which corrected cases ran and when. Optional exercises remain in TODO.md. Editing a document or passing its static checker does not rerun the application tests.

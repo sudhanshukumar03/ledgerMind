@@ -10,24 +10,15 @@ import { Play, Loader2, AlertCircle, CheckCircle2, RefreshCcw } from 'lucide-rea
 import useSWR from 'swr';
 import { useSetInProgressRun } from '../../../components/providers/SWRProvider';
 
-/**
- * Match rate = matched / (matched + exceptions), matching the Dashboard's
- * headline figure. (Using totalRecords as the denominator double-counts
- * records that are neither matched nor flagged, which made the same run read
- * as a lower rate here than on the Dashboard.)
- */
-const matchRateOf = (r: ReconciliationRun) => {
-  const matched = r.matchedCount ?? 0;
-  const denom = matched + (r.exceptionCount ?? 0);
-  return denom > 0 ? (matched / denom) * 100 : 0;
-};
+// Payment-to-settlement coverage uses numerator and denominator saved by this run.
+const matchRateOf = (r: ReconciliationRun) => r.capturedPayments ? ((r.matchedPayments ?? 0) / r.capturedPayments) * 100 : 0;
 
 export default function ReconciliationPage() {
   const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [running, setRunning] = useState(false);
   const setInProgressRun = useSetInProgressRun();
 
-  const { data: runs = [], isLoading: loading, mutate } = useSWR(
+  const { data: runs = [], isLoading: loading, mutate, error } = useSWR(
     'reconciliation-runs',
     () => reconciliationApi.listRuns(),
     { fallbackData: [] }
@@ -56,7 +47,7 @@ export default function ReconciliationPage() {
   // Headline match rate (consistent with the Dashboard) plus run-over-run
   // trend and sparkline series for the stat cards. Runs arrive newest-first,
   // so reverse for a chronological (oldest → newest) sparkline.
-  const latestDenom = latest ? (latest.matchedCount ?? 0) + (latest.exceptionCount ?? 0) : 0;
+  const latestDenom = latest?.capturedPayments ?? 0;
   const latestRate = latest ? matchRateOf(latest) : 0;
   const prevRate = runs[1] ? matchRateOf(runs[1]) : null;
   const rateDelta = prevRate != null ? latestRate - prevRate : null;
@@ -99,12 +90,13 @@ export default function ReconciliationPage() {
 
       <div className="flex-1 overflow-auto p-6 md:p-10 flex flex-col gap-8">
         
+        {error && <p role="alert" style={{ color: C.critical }}>Unable to load runs. Refresh to retry.</p>}
         {msg && (
           <div 
             className="flex items-center gap-3 px-4 py-3 rounded-lg border text-[13px] font-medium"
             style={{ 
               backgroundColor: msg.type === 'success' ? C.successTint : C.criticalTint,
-              borderColor: msg.type === 'success' ? `${C.success}40` : `${C.critical}40`,
+              borderColor: msg.type === 'success' ? `color-mix(in srgb, ${C.success} 25%, transparent)` : `color-mix(in srgb, ${C.critical} 25%, transparent)`,
               color: msg.type === 'success' ? C.success : C.critical
             }}
           >
@@ -157,7 +149,7 @@ export default function ReconciliationPage() {
               <tbody className="divide-y" style={{ borderColor: C.border }}>
                 {loading ? (
                   <tr><td colSpan={6} className="text-center py-12"><Loader2 className="w-5 h-5 animate-spin mx-auto" style={{ color: C.primary }}/></td></tr>
-                ) : runs.length === 0 ? (
+                ) : error ? (<tr><td colSpan={6}>Run data is unavailable.</td></tr>) : runs.length === 0 ? (
                   <tr><td colSpan={6} className="text-center py-12 text-[13px]" style={{ color: C.textMuted }}>No runs yet — click "Run Now"</td></tr>
                 ) : runs.map(run => {
                   const started = new Date(run.startedAt);

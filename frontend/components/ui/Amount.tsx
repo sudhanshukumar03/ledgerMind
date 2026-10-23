@@ -20,7 +20,9 @@ export function Amount({ value, color = C.textPrimary, className = '', showSign 
   let numericValue: bigint;
 
   try {
-    numericValue = typeof value === 'bigint' ? value : BigInt(Math.floor(Number(value)));
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error('Unsafe paise');
+    if (typeof value === 'string' && !/^-?\d+$/.test(value)) throw new Error('Invalid paise');
+    numericValue = BigInt(value);
     isNegative = numericValue < BigInt(0);
     isPositive = numericValue > BigInt(0);
   } catch {

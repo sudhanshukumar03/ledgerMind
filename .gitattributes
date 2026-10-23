@@ -1,0 +1,2 @@
+# Linux entrypoints must remain executable shell text after a Windows checkout.
+*.sh text eol=lf

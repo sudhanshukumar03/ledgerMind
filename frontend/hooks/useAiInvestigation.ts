@@ -1,69 +1,67 @@
 'use client';
-
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { exceptionsApi } from '../lib/api-client';
 import { AiAnalysis } from '../lib/types';
 
-export function useAiInvestigation(exceptionId: string, initialAnalysis?: AiAnalysis) {
-  const [data, setData] = useState<AiAnalysis | undefined>(initialAnalysis);
+export function useAiInvestigation(
+  exceptionId: string,
+  initialAnalysis?: AiAnalysis,
+) {
+  const [scopedData, setData] = useState({
+    id: exceptionId,
+    value: initialAnalysis,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
-  const abortControllerRef = useRef<AbortController | null>(null);
-  
+  const active = useRef<AbortController | null>(null);
   const reset = useCallback(() => {
-    setData(initialAnalysis);
+    active.current?.abort();
+    active.current = null;
+    setData({ id: exceptionId, value: initialAnalysis });
     setError(null);
     setLoading(false);
-  }, [initialAnalysis]);
-
+  }, [initialAnalysis, exceptionId]);
+  useEffect(() => {
+    reset();
+    return () => {
+      active.current?.abort();
+      active.current = null;
+    };
+  }, [exceptionId, reset]);
   const investigate = useCallback(async () => {
-    // Abort previous in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
+    active.current?.abort();
     const controller = new AbortController();
-    abortControllerRef.current = controller;
-
+    active.current = controller;
     setLoading(true);
     setError(null);
-
+    const timer = setTimeout(() => controller.abort(), 15000);
     try {
-      // Manual 15s timeout
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-      }, 15000);
-
-      const res = await exceptionsApi.investigate(exceptionId);
-      
-      clearTimeout(timeoutId);
-      
-      if (!controller.signal.aborted) {
-        setData(res.data);
-      }
+      const res = await exceptionsApi.investigate(
+        exceptionId,
+        controller.signal,
+      );
+      if (active.current === controller && !controller.signal.aborted)
+        setData({ id: exceptionId, value: res.data });
     } catch (err: any) {
-      if (err.name === 'AbortError' || err.code === 'ECONNABORTED' || err.message === 'canceled') {
-        if (controller.signal.aborted) {
-          setError('Investigation timed out or was canceled.');
-        }
-      } else {
-        setError(err.response?.data?.message || err.message || 'Failed to investigate exception.');
-      }
+      if (active.current === controller)
+        setError(
+          controller.signal.aborted
+            ? 'Investigation timed out. Try again.'
+            : err.response?.data?.message || 'Investigation failed.',
+        );
     } finally {
-      if (!controller.signal.aborted) {
+      clearTimeout(timer);
+      if (active.current === controller) {
+        active.current = null;
         setLoading(false);
       }
     }
   }, [exceptionId]);
-
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
-
-  return { data, loading, error, investigate, reset };
+  return {
+    data: scopedData.id === exceptionId ? scopedData.value : initialAnalysis,
+    loading,
+    error,
+    investigate,
+    reset,
+  };
 }

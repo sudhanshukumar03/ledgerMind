@@ -7,13 +7,6 @@ import { PrismaModule } from '../../database/prisma.module.js';
 @Module({
   imports: [
     PrismaModule,
-    BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        password: process.env.REDIS_PASSWORD || undefined,
-      },
-    }),
     BullModule.registerQueue({ name: 'webhooks' }),
   ],
   controllers: [WebhooksController],

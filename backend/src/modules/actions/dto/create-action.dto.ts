@@ -1,10 +1,10 @@
-import { IsString, IsNotEmpty, IsEnum, IsObject, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsEnum, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ActionType } from '@prisma/client';
 
 export class CreateActionDto {
   @ApiProperty({ description: 'The UUID of the exception this action relates to' })
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   exception_id!: string;
 

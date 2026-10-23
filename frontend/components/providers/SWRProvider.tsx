@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { SWRConfig } from 'swr';
 
 interface SWRContextValue {
@@ -26,6 +26,11 @@ export function SWRProvider({ children }: { children: React.ReactNode }) {
   const handleSuccess = useCallback(() => {
     setLastUpdated(Date.now());
   }, []);
+
+  useEffect(() => {
+    window.addEventListener('ledgermind:data-updated', handleSuccess);
+    return () => window.removeEventListener('ledgermind:data-updated', handleSuccess);
+  }, [handleSuccess]);
 
   // Adaptive interval: 3s during active run, 30s otherwise
   const refreshInterval = inProgressRun ? 3000 : 30000;

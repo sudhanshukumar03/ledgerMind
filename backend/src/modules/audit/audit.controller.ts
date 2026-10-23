@@ -1,3 +1,4 @@
+import { parsePagination } from '../../common/utils/pagination.js';
 import { Controller, Get, Query, Request, UseGuards } from '@nestjs/common';
 import { AuditService } from './audit.service.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
@@ -9,7 +10,7 @@ export class AuditController {
 
     @Get()
     async findAll(@Request() req: any, @Query('limit') limit?: string) {
-        const parsedLimit = limit ? parseInt(limit, 10) : 50;
-        return this.auditService.findAll(req.user.merchantId, isNaN(parsedLimit) ? 50 : parsedLimit);
+        const { limit: take } = parsePagination(1, limit ?? '50');
+        return this.auditService.findAll(req.user.merchantId, take);
     }
 }

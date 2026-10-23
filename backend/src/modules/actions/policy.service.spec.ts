@@ -1,74 +1,63 @@
-import { PolicyService } from './policy.service.js';
-import { ActionType, Role } from '@prisma/client';
+import { PolicyService } from "./policy.service.js";
+import { ActionType, Role } from "@prisma/client";
 
-/**
- * PolicyService is the deterministic gate that decides whether an action is
- * allowed and whether it needs human approval. These tests lock in the RBAC
- * and refund-threshold guarantees so a refactor can't silently loosen them.
- *
- * Threshold is AUTO_APPROVE_BELOW_AMOUNT (paise), default 1000. The service
- * reads it in its field initialiser, so we assert against the default.
- */
-describe('PolicyService', () => {
-  let service: PolicyService;
-
-  beforeEach(() => {
-    delete process.env.AUTO_APPROVE_BELOW_AMOUNT; // use the documented default (1000)
-    service = new PolicyService();
+describe("PolicyService approval boundaries in integer paise", () => {
+  const policy = new PolicyService();
+  it.each([1, 99999, 100000, 5000000, 5000001])(
+    "blocks VIEWER for amount %s",
+    (amount) => {
+      expect(
+        policy.evaluate({
+          actionType: "REFUND",
+          amountInPaise: amount,
+          userRole: Role.VIEWER,
+        }).allowed,
+      ).toBe(false);
+    },
+  );
+  it.each([
+    [1, 0],
+    [99999, 0],
+    [100000, 1],
+    [5000000, 1],
+    [5000001, 2],
+  ])("amount %s needs %s distinct approvals", (amount, count) => {
+    for (const actionType of [
+      ActionType.REFUND,
+      ActionType.CREATE_PAYMENT_LINK,
+    ]) {
+      expect(
+        policy.evaluate({
+          actionType,
+          amountInPaise: amount,
+          userRole: Role.FINANCE,
+        }),
+      ).toMatchObject({
+        allowed: true,
+        approvalRequired: count > 0,
+        requiredApprovals: count,
+      });
+    }
   });
-
-  it('denies unsupported action types outright', () => {
-    const result = service.evaluate({
-      actionType: 'SOMETHING_ELSE' as ActionType,
-      userRole: Role.ADMIN,
-    });
-    expect(result).toEqual({ allowed: false, approvalRequired: false, reason: 'Action type not supported' });
-  });
-
-  describe('REFUND', () => {
-    it('blocks VIEWER regardless of amount (small)', () => {
-      const r = service.evaluate({ actionType: ActionType.REFUND, amountInPaise: 500, userRole: Role.VIEWER });
-      expect(r.allowed).toBe(false);
-      expect(r.reason).toMatch(/viewer/i);
-    });
-
-    it('blocks VIEWER regardless of amount (large)', () => {
-      const r = service.evaluate({ actionType: ActionType.REFUND, amountInPaise: 50_000, userRole: Role.VIEWER });
-      expect(r.allowed).toBe(false);
-    });
-
-    it('auto-approves a small refund (<= threshold) for FINANCE', () => {
-      const r = service.evaluate({ actionType: ActionType.REFUND, amountInPaise: 1000, userRole: Role.FINANCE });
-      expect(r).toEqual({ allowed: true, approvalRequired: false });
-    });
-
-    it('requires approval for a refund above the threshold', () => {
-      const r = service.evaluate({ actionType: ActionType.REFUND, amountInPaise: 1001, userRole: Role.FINANCE });
-      expect(r).toEqual({ allowed: true, approvalRequired: true });
-    });
-
-    it('treats a missing amount as 0 (auto-approve for non-viewer)', () => {
-      const r = service.evaluate({ actionType: ActionType.REFUND, userRole: Role.ADMIN });
-      expect(r).toEqual({ allowed: true, approvalRequired: false });
-    });
-  });
-
-  describe('non-refund actions (MARK_REVIEWED / ESCALATE)', () => {
-    it('blocks VIEWER', () => {
-      const r = service.evaluate({ actionType: ActionType.MARK_REVIEWED, userRole: Role.VIEWER });
-      expect(r.allowed).toBe(false);
-    });
-
-    it('allows FINANCE but requires approval', () => {
-      const r = service.evaluate({ actionType: ActionType.ESCALATE, userRole: Role.FINANCE });
-      expect(r).toEqual({ allowed: true, approvalRequired: true });
-    });
-  });
-
-  it('honours a custom AUTO_APPROVE_BELOW_AMOUNT', () => {
-    process.env.AUTO_APPROVE_BELOW_AMOUNT = '5000';
-    const custom = new PolicyService();
-    expect(custom.evaluate({ actionType: ActionType.REFUND, amountInPaise: 4000, userRole: Role.FINANCE }).approvalRequired).toBe(false);
-    expect(custom.evaluate({ actionType: ActionType.REFUND, amountInPaise: 6000, userRole: Role.FINANCE }).approvalRequired).toBe(true);
-  });
+  it.each([undefined, 0, -1, 1.2, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid amount %s",
+    (amount) => {
+      expect(() =>
+        policy.evaluate({
+          actionType: "REFUND",
+          amountInPaise: amount,
+          userRole: Role.ADMIN,
+        }),
+      ).toThrow();
+    },
+  );
+  it("denies unknown types", () =>
+    expect(
+      policy.evaluate({ actionType: "UNKNOWN" as any, userRole: Role.ADMIN })
+        .allowed,
+    ).toBe(false));
+  it("permits nonfinancial review by FINANCE", () =>
+    expect(
+      policy.evaluate({ actionType: "MARK_REVIEWED", userRole: Role.FINANCE }),
+    ).toMatchObject({ allowed: true, requiredApprovals: 0 }));
 });

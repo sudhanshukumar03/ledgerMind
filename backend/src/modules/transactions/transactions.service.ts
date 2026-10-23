@@ -1,13 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
+import { OrderStatus, PaymentStatus, RefundStatus, SettlementStatus, BankTransactionStatus } from '@prisma/client';
 import { ListTransactionsDto } from './dto/list-transactions.dto.js';
+import { parsePagination, parseDateRange, parseEnum, requireUuid } from '../../common/utils/pagination.js';
 
 @Injectable()
 export class TransactionsService {
   constructor(private prisma: PrismaService) {}
 
   async getTransactions(merchantId: string, query: ListTransactionsDto) {
-    const { type, status, from, to, page = 1, limit = 20 } = query;
+    const { status, from, to } = query;
+    const type = parseEnum(query.type, ['order', 'payment', 'refund', 'settlement', 'bank'] as const, 'type') ?? 'payment';
+    const { page, limit } = parsePagination(query.page, query.limit);
+    const statuses = { order: OrderStatus, payment: PaymentStatus, refund: RefundStatus, settlement: SettlementStatus, bank: BankTransactionStatus };
+    parseEnum(status, Object.values(statuses[type]), 'status');
     const skip = (Number(page) - 1) * Number(limit);
     const take = Number(limit);
 
@@ -15,9 +21,7 @@ export class TransactionsService {
     
     if (status) where.status = status;
     if (from || to) {
-      const createdAt: { gte?: Date; lte?: Date } = {};
-      if (from) createdAt.gte = new Date(from);
-      if (to) createdAt.lte = new Date(to);
+      const createdAt = parseDateRange(from, to);
       where.createdAt = createdAt;
     }
 
@@ -78,6 +82,7 @@ export class TransactionsService {
   }
 
   async getTransactionDetails(merchantId: string, id: string) {
+    requireUuid(id);
     // Attempt to find the transaction by id in any of the tables
     // Since we don't know the type from the URL parameters for this generic endpoint,
     // we search through the entities. A more optimized approach would pass the type.
@@ -153,11 +158,16 @@ export class TransactionsService {
       });
     }
 
+    const settlement = await this.prisma.settlement.findFirst({ where: { id, merchantId }, include: { bankTransactions: true, allocations: true } });
+    if (settlement) return this.serializeBigInt({ ...settlement, type: 'settlement', external_id: settlement.settlementId });
+    const bank = await this.prisma.bankTransaction.findFirst({ where: { id, merchantId }, include: { settlement: true } });
+    if (bank) return this.serializeBigInt({ ...bank, type: 'bank', external_id: bank.bankTxnId });
     throw new NotFoundException('Transaction not found');
   }
 
   private serializeBigInt(obj: unknown): unknown {
     if (obj === null || obj === undefined) return obj;
+    if (obj instanceof Date) return obj.toISOString();
     if (typeof obj === 'bigint') return obj.toString();
     if (Array.isArray(obj)) return obj.map(item => this.serializeBigInt(item));
     if (typeof obj === 'object') {

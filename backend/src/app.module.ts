@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { InfrastructureModule } from './config/infrastructure.module.js';
+import { validateEnvironment } from './config/env.validation.js';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { PrismaModule } from './database/prisma.module.js';
@@ -23,37 +26,69 @@ import { HealthModule } from './modules/health/health.module.js';
 
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { RedisThrottlerStorage } from './common/throttler/redis-throttler-storage.js';
-import { THROTTLE, throttlerTracker, ipGlobalKey } from './common/throttler/throttler.config.js';
-
-// Single shared instance: passed to the throttler as its storage backend and
-// also registered as a provider below so its shutdown hook can close Redis.
-const throttlerStorage = new RedisThrottlerStorage();
+import {
+  THROTTLE,
+  throttlerTracker,
+  ipGlobalKey,
+} from './common/throttler/throttler.config.js';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot({
-      throttlers: [
-        // Per-route ceiling (route + IP). Routes tighten this via @Throttle.
-        { name: 'default', ttl: THROTTLE.GLOBAL_TTL, limit: THROTTLE.GLOBAL_LIMIT },
-        // Route-agnostic hard cap per IP across the whole API — stops a single
-        // source flooding by spreading over many endpoints.
-        { name: 'ip-global', ttl: THROTTLE.IP_GLOBAL.ttl, limit: THROTTLE.IP_GLOBAL.limit, generateKey: ipGlobalKey },
-      ],
-      storage: throttlerStorage,
-      getTracker: (req) => throttlerTracker(req),
-      errorMessage: 'Too many requests — please slow down and try again shortly.',
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnvironment }),
+    InfrastructureModule,
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          host: config.get<string>('REDIS_HOST', 'localhost'),
+          port: config.get<number>('REDIS_PORT', 6379),
+          password: config.get<string>('REDIS_PASSWORD') || undefined,
+        },
+      }),
+    }),
+    ThrottlerModule.forRootAsync({
+      imports: [InfrastructureModule],
+      inject: [RedisThrottlerStorage, ConfigService],
+      useFactory: (storage: RedisThrottlerStorage, config: ConfigService) => ({
+        throttlers: [
+          // Per-route ceiling (route + IP). Routes tighten this via @Throttle.
+          {
+            name: 'default',
+            ttl: THROTTLE.GLOBAL_TTL,
+            limit: THROTTLE.GLOBAL_LIMIT,
+          },
+          // Route-agnostic hard cap per IP across the whole API — stops a single
+          // source flooding by spreading over many endpoints.
+          {
+            name: 'ip-global',
+            ttl: THROTTLE.IP_GLOBAL.ttl,
+            limit: config.get<number>('THROTTLE_IP_GLOBAL', 300),
+            generateKey: ipGlobalKey,
+          },
+        ],
+        storage,
+        getTracker: (req: {
+          ip?: string;
+          socket?: { remoteAddress?: string };
+        }) => throttlerTracker(req),
+        errorMessage:
+          'Too many requests — please slow down and try again shortly.',
+      }),
     }),
     // Register JwtModule at root scope so the global JwtAuthGuard can inject JwtService
     JwtModule.registerAsync({
       global: true,
       useFactory: () => {
         if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
-          throw new Error('JWT_SECRET must be at least 32 characters long. Please set a strong secret in .env');
+          throw new Error(
+            'JWT_SECRET must be at least 32 characters long. Please set a strong secret in .env',
+          );
         }
         return {
           secret: process.env.JWT_SECRET,
-          signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN || '24h') as any },
+          signOptions: {
+            expiresIn: (process.env.JWT_EXPIRES_IN || '24h') as any,
+          },
         };
       },
     }),
@@ -76,9 +111,6 @@ const throttlerStorage = new RedisThrottlerStorage();
     HealthModule,
   ],
   providers: [
-    // Register the shared Redis throttler storage so its OnApplicationShutdown
-    // hook fires (when shutdown hooks are enabled) and Redis is closed cleanly.
-    { provide: RedisThrottlerStorage, useValue: throttlerStorage },
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,

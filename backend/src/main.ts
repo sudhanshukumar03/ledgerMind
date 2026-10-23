@@ -1,8 +1,8 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module.js';
+import { ConfigModule } from '@nestjs/config';
+import { validateEnvironment } from './config/env.validation.js';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { cleanupOpenApiDoc } from 'nestjs-zod';
 
 import helmet from 'helmet';
 import { json } from 'express';
@@ -12,26 +12,31 @@ import { json } from 'express';
 };
 
 async function bootstrap() {
+  // Load the selected cwd .env before importing Prisma/application modules.
+  // Prisma's implicit env loader must not choose a different checkout target.
+  await ConfigModule.forRoot({ isGlobal: true, validate: validateEnvironment });
+  const { AppModule } = await import('./app.module.js');
   const app = await NestFactory.create(AppModule, {
     rawBody: true, // ← Required for webhook HMAC verification
   });
+
+  app.enableShutdownHooks();
 
   // Behind a reverse proxy / load balancer, req.ip must come from
   // X-Forwarded-For for rate limiting to key on the real client. Trust only as
   // many proxy hops as actually front the app — trusting all hops lets clients
   // spoof XFF and evade the limiter. TRUST_PROXY accepts a hop count ("1"),
-  // "true"/"false", or an IP/subnet; defaults to 1 in production, off in dev.
+  // "true"/"false", or an IP/subnet; defaults to off; configure actual proxy hops explicitly.
   const trustProxyEnv = process.env.TRUST_PROXY;
-  const trustProxy =
-    trustProxyEnv === undefined
-      ? process.env.NODE_ENV === 'production'
-      : /^\d+$/.test(trustProxyEnv)
-        ? parseInt(trustProxyEnv, 10)
-        : trustProxyEnv === 'true'
-          ? true
-          : trustProxyEnv === 'false'
-            ? false
-            : trustProxyEnv;
+  const trustProxy = !trustProxyEnv
+    ? false
+    : /^\d+$/.test(trustProxyEnv)
+      ? parseInt(trustProxyEnv, 10)
+      : trustProxyEnv === 'true'
+        ? true
+        : trustProxyEnv === 'false'
+          ? false
+          : trustProxyEnv;
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxy);
 
   app.use(helmet());
@@ -53,13 +58,15 @@ async function bootstrap() {
   // Swagger exposes the full API surface. Serve it only outside production so
   // the /api docs can't be scraped as an unauthenticated reconnaissance aid on
   // a live deployment. Set SWAGGER_ENABLED=true to opt back in explicitly.
-  if (process.env.NODE_ENV !== 'production' || process.env.SWAGGER_ENABLED === 'true') {
+  if (
+    process.env.NODE_ENV !== 'production' ||
+    process.env.SWAGGER_ENABLED === 'true'
+  ) {
     const config = new DocumentBuilder()
       .setTitle('LedgerMind API')
       .setVersion('1.0')
       .build();
     let document = SwaggerModule.createDocument(app, config);
-    document = cleanupOpenApiDoc(document);
     SwaggerModule.setup('api', app, document);
   }
 
@@ -70,6 +77,9 @@ async function bootstrap() {
 
   app.enableCors({ origin: frontendUrl || 'http://localhost:3000' });
 
-  await app.listen(process.env.PORT || 3000);
+  await app.listen(
+    process.env.PORT || 3001,
+    process.env.BIND_ADDRESS || '0.0.0.0',
+  );
 }
 bootstrap();

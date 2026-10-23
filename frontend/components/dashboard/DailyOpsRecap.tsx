@@ -55,7 +55,7 @@ export function DailyOpsRecap({ metrics, loading }: DailyOpsRecapProps) {
     if (Number(metrics.total_transaction_volume) > 0) {
       clauses.push(
         <span key="volume">
-          {formatPaise(metrics.total_transaction_volume)} processed
+          {formatPaise(metrics.total_transaction_volume)} captured (all time)
         </span>
       );
     }
@@ -66,7 +66,7 @@ export function DailyOpsRecap({ metrics, loading }: DailyOpsRecapProps) {
 
     return (
       <span>
-        Today so far: {clauses.map((clause, i) => {
+        Current overview: {clauses.map((clause, i) => {
           if (i === 0) return clause;
           if (i === clauses.length - 1) {
             return clauses.length === 2 ? <span key={`sep-${i}`}> and {clause}</span> : <span key={`sep-${i}`}>, and {clause}</span>;

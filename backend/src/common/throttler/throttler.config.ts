@@ -20,7 +20,7 @@ export const THROTTLE = {
    * Generous enough for a real user's dashboard (many parallel calls on load),
    * tight enough to blunt an L7 flood. Tune via env if fronted by shared NAT.
    */
-  IP_GLOBAL: { limit: Number(process.env.THROTTLE_IP_GLOBAL || 300), ttl: 60_000 },
+  IP_GLOBAL: { limit: 300, ttl: 60_000 },
 
   /** Auth login — credential-stuffing / brute-force guard. */
   LOGIN: { limit: 5, ttl: 60_000 },

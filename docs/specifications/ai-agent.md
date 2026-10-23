@@ -1,312 +1,63 @@
-# AI Agent Specification
+# AI Finance Controller specification
 
-## 1. Purpose
+The AI Finance Controller explains deterministic financial evidence and returns action proposals. It does not authorize money movement, create Action rows, or call the Action Engine. Required analysis/chat audit persistence is handled by the application service.
 
-The LedgerMind AI Finance Controller is an AI-powered investigation and decision-support layer.
+## Current tool catalogue
 
-Its purpose is to help financial operators answer:
+AI_TOOLS in [ai.service.ts](../../backend/src/modules/ai/ai.service.ts) defines 16 functions: 13 discovery/advisory functions and three proposal functions. All are merchant scoped.
 
-- What happened?
-- Why did it happen?
-- How much money is exposed?
-- Who is affected?
-- What evidence supports the conclusion?
-- What should happen next?
+| Tool | Kind | Purpose |
+| --- | --- | --- |
+| get_transaction | Discovery | Retrieve a payment or order. |
+| get_order | Discovery | Retrieve an order and payments. |
+| get_payment | Discovery | Retrieve a payment, order, and refunds. |
+| get_refund | Discovery | Retrieve a refund and payment. |
+| get_settlement | Discovery | Retrieve a settlement, allocations, and linked bank entries. |
+| find_related_transactions | Discovery | Resolve related payments/refunds. |
+| get_exception | Discovery | Retrieve an exception, its timeline, and stored evidence. |
+| get_customer_history | Discovery | Retrieve scoped customer orders/payments. |
+| get_merchant_history | Discovery | Retrieve the authenticated merchant's recent exceptions/runs. |
+| calculate_exposure | Discovery | Return deterministic stored exposure facts. |
+| create_resolution_plan | Advisory | Return suggested next steps without executing them. |
+| list_open_exceptions | Discovery | List OPEN exceptions with optional severity. |
+| get_reconciliation_run | Discovery | Retrieve a merchant-scoped run. |
+| request_refund | Proposal | Return a REFUND proposal and resolved references. |
+| create_payment_link | Proposal | Return a CREATE_PAYMENT_LINK proposal. |
+| mark_for_review | Proposal | Return a MARK_REVIEWED proposal. |
 
-The AI is **not the financial source of truth**.
+Operators submit proposal data through POST /actions. Refund payment references resolve to internal IDs; payment-link proposals may expose the provider order reference, which the Action Engine resolves and validates. Never assume every string ID is a UUID.
 
----
+Proposal amounts are safe integer numbers in paise, rather than the decimal strings used for stored BigInt fields. The tools currently return requires_approval=true as a fixed advisory flag. It is not a calculated human-approval requirement: the Action Engine applies the actual zero/one/two-approver policy after operator submission. A proposal may also have exception_id=null when its exception reference cannot be resolved, so it cannot be submitted unchanged.
 
-## 2. AI Responsibility Boundary
+There are no aliases named propose_refund, propose_payment_link, propose_escalation, get_bank_transaction, get_exception_timeline, or search_exceptions. Additional capabilities must be implemented and validated explicitly.
 
-```text
-                    LedgerMind
-                        │
-             ┌──────────┴──────────┐
-             │                     │
-       Deterministic           AI Controller
-          Engine                    │
-             │                      │
-      Facts + Rules          Investigation
-             │                Explanation
-             │                Recommendation
-             │                      │
-             └──────────┬───────────┘
-                        │
-                  Policy Engine
-                        │
-                  Human Approval
-                        │
-                  Action Engine
-```
+## Investigation and chat
 
-The AI reasons over trusted application data but does not directly mutate financial state.
+Investigation loads the scoped exception and stored evidence before model/tool rounds. The runtime validates each tool name against the request allow-list and parses/validates arguments inside the controlled error boundary. Required strings, severity, bounded limits, and safe positive paise are checked. Unknown/disallowed/malformed calls produce controlled tool errors.
 
-## 3. Core Capabilities
-
-### 3.1 Exception Investigation
-
-Given an exception, the AI gathers relevant evidence and explains the discrepancy.
-
-### 3.2 Root-Cause Analysis
-
-The AI identifies the most likely explanation based on observed evidence.
-
-### 3.3 Financial Exposure
-
-The AI reports exposure calculated from system data.
-
-The AI must not invent financial values.
-
-### 3.4 Customer Impact
-
-The AI determines whether the issue potentially affects:
-- Customer payment status
-- Refund status
-- Order fulfilment
-- Duplicate charges
-- Delayed refunds
-
-### 3.5 Recommended Resolution
-
-The AI recommends the next operational step.
-
-Recommendations are not automatically executed.
-
-## 4. Tool Architecture
-
-The AI interacts with internal tools.
-
-### Read-only tools
-
-| Tool                       | Purpose                           |
-|----------------------------|-----------------------------------|
-| `get_exception`            | Retrieve exception details        |
-| `get_order`                | Retrieve order                    |
-| `get_payment`              | Retrieve payment                  |
-| `get_refund`               | Retrieve refund                   |
-| `get_settlement`           | Retrieve settlement               |
-| `get_bank_transaction`     | Retrieve bank transaction         |
-| `find_related_transactions`| Find related records              |
-| `get_exception_timeline`   | Retrieve chronological evidence   |
-| `search_exceptions`        | Search exception queue            |
-| `calculate_exposure`       | Deterministically calculate exposure |
-
-### Proposal tools
-
-| Tool                    | Purpose                           |
-|-------------------------|-----------------------------------|
-| `propose_refund`        | Create refund proposal            |
-| `propose_payment_link`  | Create payment-link proposal      |
-| `propose_review`        | Propose manual review             |
-| `propose_escalation`    | Propose escalation                |
-
-Proposal tools never execute financial actions.
-
-## 5. Tool Access Rules
-
-The AI must follow:
-
-```text
-AI
- │
- ├── READ → Allowed
- │
- ├── ANALYZE → Allowed
- │
- ├── PROPOSE → Allowed
- │
- └── EXECUTE → Forbidden
-```
-
-Any execution must pass through:
-
-```text
-Policy Engine
-      ↓
-Approval
-      ↓
-Action Engine
-```
-
-## 6. Investigation Workflow
-
-```text
-User asks investigation
-        ↓
-Identify exception
-        ↓
-Retrieve exception
-        ↓
-Retrieve related entities
-        ↓
-Retrieve timeline
-        ↓
-Compare states and amounts
-        ↓
-Calculate exposure
-        ↓
-Determine likely cause
-        ↓
-Assign confidence
-        ↓
-Recommend action
-        ↓
-Return evidence-backed analysis
-```
-
-## 7. System Prompt
-
-The production system prompt should enforce the following principles:
-
-```text
-You are LedgerMind's AI Finance Controller.
-
-Your role is to investigate financial reconciliation exceptions,
-explain discrepancies using verified system data, and recommend
-safe operational next steps.
-
-Rules:
-
-1. Never invent financial data.
-2. Never assume a transaction exists without evidence.
-3. Use internal tools whenever additional evidence is required.
-4. Distinguish observed facts from hypotheses.
-5. Every important conclusion must reference evidence.
-6. Report confidence from 0 to 100.
-7. If evidence is insufficient, explicitly state uncertainty.
-8. Never directly execute financial actions.
-9. Never bypass the Policy Engine.
-10. Never recommend irreversible action without sufficient evidence.
-11. Prefer human review when uncertainty is material.
-12. Never modify database records through investigation tools.
-```
-
-## 8. Structured Output
-
-Every exception investigation should produce:
-
-```json
-{
-  "summary": "Concise explanation of the issue.",
-  "likely_cause": "Most likely explanation.",
-  "confidence": 94,
-  "financial_exposure": 500000,
-  "customer_impact": "HIGH",
-  "recommended_action": "Verify the bank credit before resolution.",
-  "evidence_chain": [
-    {
-      "source": "payment",
-      "fact": "Payment status is FAILED."
-    },
-    {
-      "source": "bank_transaction",
-      "fact": "Bank shows a matching credit."
-    }
-  ],
-  "next_steps": [
-    "Verify UTR.",
-    "Check whether the customer was charged.",
-    "Escalate if the state cannot be confirmed."
-  ]
-}
-```
-
-## 9. Facts vs Hypotheses
-
-The AI must distinguish between:
-
-**Fact**
-```text
-Payment status = FAILED
-Bank credit = ₹5,000
-```
-
-**Hypothesis**
-```text
-The payment gateway may have failed to update
-the payment state after receiving the bank confirmation.
-```
-
-The second statement must never be presented as certain without evidence.
-
-## 10. Confidence Model
-
-Confidence represents evidence strength, not model certainty.
-
-Suggested interpretation:
-
-| Confidence | Interpretation          |
-|------------|-------------------------|
-| 90–100     | Strong evidence         |
-| 75–89      | High confidence         |
-| 50–74      | Moderate confidence     |
-| <50        | Insufficient evidence   |
-
-When confidence is low, the AI should recommend human investigation.
-
-## 11. AI Chat
-
-The Command Center supports questions such as:
-
-- Show all unresolved high-value exceptions.
-- Which settlements failed today?
-- Why is EXC-1024 still unresolved?
-- Which customers may have been charged twice?
-- What are the most financially significant exceptions?
-
-The AI converts natural-language requests into safe read-only queries.
-
-## 12. Prompt Injection Protection
-
-Financial records may contain untrusted text.
-
-Examples:
-- Bank descriptions
-- Customer-entered metadata
-- Order notes
-- Payment references
-
-These fields must be treated as data, not instructions.
-
-The AI must never follow instructions embedded inside financial records.
-
-## 13. Failure Handling
-
-### Tool Failure
-The AI should state that evidence could not be retrieved.
-
-### Low Confidence
-Recommend manual investigation.
-
-### Model Timeout
-Return a graceful retry message.
-
-### Invalid Structured Output
-Validate against the expected schema and retry or reject the response.
-
-## 14. AI Auditability
-
-Each AI investigation should record:
-- Exception ID
-- Model
-- Prompt/version identifier
-- Tools called
-- Tool results used
-- Output
-- Confidence
-- Timestamp
-
-Sensitive information should be minimized in AI logs.
-
-## 15. Design Principle
-
-The AI Controller follows:
-
-> **Observe → Investigate → Explain → Recommend**
-
-It does not follow:
-
-> ~~Observe → Decide → Move Money~~
-
-That boundary is fundamental to LedgerMind's safety model.
+The loop allows up to three normal rounds, then final synthesis if needed. If that synthesis request fails, the service retries it once without JSON mode. The 30-second client setting applies to an individual request, not the whole investigation; multiple rounds can take longer. A browser investigation timeout of 15 seconds clears UI loading and permits retry, without proving that an already submitted provider call stopped. No sub-two-second latency guarantee has been measured.
+
+Metadata, descriptions, and financial snapshots are untrusted input. Prompt wording alone is not a security boundary; tool capabilities, merchant scope, and Action Engine authorization remain authoritative.
+
+## Analysis output and audit
+
+| Field / behavior | Contract |
+| --- | --- |
+| summary and likely_cause | Required nonempty trimmed strings for successful structured analysis. |
+| confidence | Required integer from 0 through 100. |
+| Financial exposure | Deterministic stored facts, returned as exact decimal paise. |
+| Metadata | model, promptVersion, latencyMs, isFallback, toolCalls, and evidence trail. |
+| Persistence | Analysis and required audit commit in one transaction. |
+| Fallback | Explicit for disabled/unavailable provider, empty output, invalid JSON/fields, or explicitly incomplete final responses. |
+
+Normal and forced-final paths use the same completion checks. Empty objects cannot silently become successful default analyses. Fresh and saved results expose the evidence trail, and exception detail orders saved analyses newest first.
+
+Every chat response, including fallback and nonproposal turns, requires audit persistence; audit failure remains visible. Input accepts 1-40 user/assistant turns of 1-8,000 nonblank characters. Clients cannot supply trusted system/tool roles. The browser sends a bounded recent window within 90 KB encoded JSON.
+
+## Model configuration
+
+Application configuration defaults AI_ENABLED to false. Disabled AI or an absent GROQ_API_KEY keeps deterministic functions usable and returns an auditable unavailable result. Enable provider calls explicitly and provide a valid key.
+
+The Groq endpoint is https://api.groq.com/openai/v1. AI_MODEL falls back to llama-3.3-70b-versatile in both application and Compose; choose an explicit model for consistent experiments. Account availability and latency need separate verification.
+
+Investigation is available on demand; creating an exception does not automatically schedule it in every path. Connectivity probes and labeled quality evaluation are different exercises. See [setup](../operations/local-development.md#optional-groq-setup), [testing](../operations/testing.md#optional-provider-checks), and [completed evidence](../operations/fix-verification.md).

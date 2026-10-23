@@ -45,6 +45,7 @@ export function TransactionDrawer({
 }) {
   const [payment, setPayment] = useState<PaymentDetail | null>(null);
   const [settlement, setSettlement] = useState<SettlementDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const handleClose = () => {
@@ -59,17 +60,22 @@ export function TransactionDrawer({
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
+    let current = true;
+    setError(null);
     setLoading(true);
     setPayment(null);
     setSettlement(null);
-    const req = kind === 'payment' ? transactionsApi.getPayment(id) : transactionsApi.getSettlement(id);
+    const req = kind === 'payment' ? transactionsApi.getPayment(id, controller.signal) : transactionsApi.getSettlement(id, controller.signal);
     req
       .then((r) => {
+        if (!current) return;
         if (kind === 'payment') setPayment(r.data as PaymentDetail);
         else setSettlement(r.data as SettlementDetail);
       })
-      .catch(() => onClose())
-      .finally(() => setLoading(false));
+      .catch(() => { if (current) setError('Unable to load transaction. Reopen to retry.'); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; controller.abort(); };
   }, [kind, id]);
 
   const externalId = kind === 'payment' ? payment?.paymentId : settlement?.settlementId;
@@ -86,6 +92,7 @@ export function TransactionDrawer({
         className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-bg shadow-2xl z-50 flex flex-col animate-slide-left border-l"
         style={{ borderColor: C.border }}
       >
+        {error && <p role="alert" className="p-4" style={{ color: C.critical }}>{error}</p>}
         {/* Header */}
         <div className="shrink-0 px-6 py-5 border-b flex items-start justify-between bg-surface" style={{ borderColor: C.border }}>
           {loading ? (

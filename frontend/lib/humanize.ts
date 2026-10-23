@@ -1,3 +1,4 @@
+import { formatPaise } from './utils';
 /**
  * Shared, presentation-only formatters for turning raw record data (audit state
  * snapshots, AI tool-call payloads) into human-readable text. Pure functions —
@@ -29,7 +30,8 @@ export const humanizeKey = (s: string) =>
 export const humanizeLabel = (s: string) => humanizeKey(s).replace(/\s*Paise$/i, '');
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
-const MONEY_KEY = /(amount|impact|exposure|balance|fee|total|refund|paise)/i;
+const MONEY_FIELDS = new Set(['amount', 'expectedamount', 'actualamount', 'differenceamount', 'financialimpact', 'financialexposure', 'balance', 'fee', 'fees', 'tax', 'refundamount', 'refundedamount', 'remainingamount', 'netamount', 'grossamount', 'totaltransactionvolume']);
+const moneyKey = (key: string) => { const normalized = key.replace(/_/g, '').toLowerCase(); return MONEY_FIELDS.has(normalized) || normalized.endsWith('paise'); };
 
 /** Render one field value in a human-readable form (no raw JSON). */
 export function formatValue(key: string, value: unknown): string {
@@ -37,8 +39,8 @@ export function formatValue(key: string, value: unknown): string {
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   // Amounts are stored as integer paise; Prisma / the API serialize them as
   // numbers or decimal strings, so handle both.
-  if (MONEY_KEY.test(key) && ((typeof value === 'number' && Number.isInteger(value)) || (typeof value === 'string' && /^-?\d+$/.test(value)))) {
-    return `₹${(Number(value) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (moneyKey(key) && ((typeof value === 'number' && Number.isSafeInteger(value)) || (typeof value === 'string' && /^-?\d+$/.test(value)))) {
+    return formatPaise(String(value));
   }
   if (typeof value === 'number') return value.toLocaleString('en-IN');
   if (typeof value === 'string') {
@@ -77,5 +79,5 @@ export function isIdentifier(key: string, value: unknown): boolean {
 
 /** True when `value` is a money field by key name and a whole-number paise amount. */
 export function isMoney(key: string, value: unknown): boolean {
-  return MONEY_KEY.test(key) && ((typeof value === 'number' && Number.isInteger(value)) || (typeof value === 'string' && /^-?\d+$/.test(value)));
+  return moneyKey(key) && ((typeof value === 'number' && Number.isSafeInteger(value)) || (typeof value === 'string' && /^-?\d+$/.test(value)));
 }

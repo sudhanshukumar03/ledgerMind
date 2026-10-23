@@ -78,6 +78,7 @@ enum WebhookProcessingStatus {
   FAILED
   IGNORED_DUPLICATE
   IGNORED_STALE
+  UNSUPPORTED
 }
 
 enum ReconciliationRunStatus {
@@ -147,6 +148,7 @@ enum ActionStatus {
   APPROVED
   REJECTED
   EXECUTING
+  OUTCOME_UNKNOWN
   COMPLETED
   FAILED
 }
@@ -189,6 +191,7 @@ model User {
 
   merchant         Merchant   @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   requestedActions Action[]   @relation("ActionRequestedBy")
+  approvals        ActionApproval[]
   approvedActions  Action[]   @relation("ActionApprovedBy")
   auditLogs        AuditLog[]
 
@@ -230,12 +233,14 @@ model Payment {
   currency   String        @default("INR") @db.VarChar(3)
   method     String?
   status     PaymentStatus @default(CREATED)
+  providerOrderId String? @map("provider_order_id")
   capturedAt DateTime?     @map("captured_at") @db.Timestamptz(6)
   createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   order    Order?   @relation(fields: [orderId], references: [id])
+  allocations SettlementAllocation[]
   refunds  Refund[]
 
   @@index([merchantId, createdAt])
@@ -267,12 +272,14 @@ model Settlement {
   settlementId   String           @unique @map("settlement_id")
   merchantId     String           @map("merchant_id") @db.Uuid
   amount         BigInt
+  currency String @default("INR") @db.VarChar(3)
   settlementDate DateTime         @map("settlement_date") @db.Date
   status         SettlementStatus @default(CREATED)
   utr            String?
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  allocations      SettlementAllocation[]
   merchant         Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   bankTransactions BankTransaction[]
 
@@ -287,6 +294,9 @@ model BankTransaction {
   merchantId      String                @map("merchant_id") @db.Uuid
   utr             String?
   amount          BigInt
+  currency String @default("INR") @db.VarChar(3)
+  paymentId String? @map("payment_id") @db.Uuid
+  refundId String? @map("refund_id") @db.Uuid
   transactionType BankTransactionType   @map("transaction_type")
   transactionDate DateTime              @map("transaction_date") @db.Date
   valueAt         DateTime?             @map("value_at") @db.Timestamptz(6) // time-window matching
@@ -320,6 +330,9 @@ model WebhookEvent {
   signatureVerified  Boolean                 @default(false) @map("signature_verified")
   processingStatus   WebhookProcessingStatus @default(PENDING) @map("processing_status")
   processingAttempts Int                     @default(0) @map("processing_attempts")
+  claimToken         String? @map("claim_token")
+  leaseExpiresAt     DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  nextAttemptAt      DateTime @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
   processingError    String?                 @map("processing_error")
   correlationId      String?                 @map("correlation_id")
 
@@ -340,6 +353,9 @@ model ReconciliationRun {
   dateTo         DateTime?               @map("date_to") @db.Date
   startedAt      DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt     DateTime?               @map("finished_at") @db.Timestamptz(6)
+  capturedPayments Int @default(0) @map("captured_payments")
+  matchedPayments Int @default(0) @map("matched_payments")
+  capturedVolume BigInt @default(0) @map("captured_volume")
   totalRecords   Int                     @default(0) @map("total_records")
   matchedCount   Int                     @default(0) @map("matched_count")
   exceptionCount Int                     @default(0) @map("exception_count")
@@ -481,6 +497,14 @@ model Action {
   actionType       ActionType   @map("action_type")
   status           ActionStatus @default(PROPOSED)
   parameters       Json
+  executionProtocol String? @map("execution_protocol")
+  requiredApprovals Int @default(0) @map("required_approvals")
+  targetPaymentId String? @map("target_payment_id") @db.Uuid
+  targetOrderId String? @map("target_order_id") @db.Uuid
+  reservedAmount BigInt @default(0) @map("reserved_amount")
+  executionLeaseUntil DateTime? @map("execution_lease_until") @db.Timestamptz(6)
+  executionClaimToken String? @map("execution_claim_token") @db.Uuid
+  externalSubmittedAt DateTime? @map("external_submitted_at") @db.Timestamptz(6)
   proposedByAi     Boolean      @default(false) @map("proposed_by_ai")
   requestedById    String?      @map("requested_by") @db.Uuid
   approvedById     String?      @map("approved_by") @db.Uuid
@@ -495,12 +519,14 @@ model Action {
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  approvals   ActionApproval[]
   merchant    Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   exception   Exception @relation(fields: [exceptionId], references: [id])
   requestedBy User?     @relation("ActionRequestedBy", fields: [requestedById], references: [id])
   approvedBy  User?     @relation("ActionApprovedBy", fields: [approvedById], references: [id])
 
   @@index([merchantId, status])
+  @@index([merchantId, targetOrderId, actionType, status])
   @@index([exceptionId])
   @@map("actions")
 }
@@ -529,4 +555,31 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([merchantId, createdAt])
   @@map("audit_logs")
+}
+
+model ActionApproval {
+  id String @id @default(uuid()) @db.Uuid
+  actionId String @map("action_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  reason String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  action Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+  @@unique([actionId, userId])
+  @@map("action_approvals")
+}
+
+model SettlementAllocation {
+  id String @id @default(uuid()) @db.Uuid
+  settlementId String @map("settlement_id") @db.Uuid
+  paymentId String @map("payment_id") @db.Uuid
+  grossAmount BigInt @map("gross_amount")
+  refundAmount BigInt @default(0) @map("refund_amount")
+  feeAmount BigInt @default(0) @map("fee_amount")
+  taxAmount BigInt @default(0) @map("tax_amount")
+  adjustmentAmount BigInt @default(0) @map("adjustment_amount")
+  settlement Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId], references: [id])
+  @@unique([settlementId, paymentId])
+  @@map("settlement_allocations")
 }

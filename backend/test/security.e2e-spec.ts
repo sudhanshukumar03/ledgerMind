@@ -1,6 +1,5 @@
 import { RazorpayClient } from '../src/integrations/razorpay/razorpay.client.js';
 
-process.env.AUTO_APPROVE_BELOW_AMOUNT = '2000';
 
 delete process.env.RAZORPAY_KEY_ID;
 delete process.env.RAZORPAY_KEY_SECRET;
@@ -46,13 +45,21 @@ describe('Security (e2e)', () => {
     prisma = app.get<PrismaService>(PrismaService);
     jwtService = app.get<JwtService>(JwtService);
 
-    // Clean up test DB tables if they exist
+    // assert-isolation.cjs runs before this module; only disposable test DBs reach cleanup.
+    await prisma.auditLog.deleteMany();
     await prisma.action.deleteMany();
     await prisma.aiAnalysis.deleteMany();
+    await prisma.exceptionEvent.deleteMany();
     await prisma.exception.deleteMany();
+    await prisma.reconciliationMatch.deleteMany();
+    await prisma.reconciliationRun.deleteMany();
+    await prisma.bankTransaction.deleteMany();
+    await prisma.settlementAllocation.deleteMany();
+    await prisma.settlement.deleteMany();
     await prisma.refund.deleteMany();
     await prisma.payment.deleteMany();
     await prisma.order.deleteMany();
+    await prisma.webhookEvent.deleteMany();
     await prisma.user.deleteMany();
     await prisma.merchant.deleteMany();
 
@@ -77,7 +84,7 @@ describe('Security (e2e)', () => {
     });
 
     const paymentA = await prisma.payment.create({
-      data: { orderId: orderA.id, merchantId: merchantAId, paymentId: 'ext_pay_a', amount: 1000n, currency: 'INR', status: 'CAPTURED', method: 'card' },
+      data: { orderId: orderA.id, merchantId: merchantAId, paymentId: 'ext_pay_a', amount: 1000n, currency: 'INR', status: 'CAPTURED', capturedAt: new Date(), method: 'card' },
     });
     paymentAId = paymentA.id;
 
@@ -85,6 +92,7 @@ describe('Security (e2e)', () => {
       data: {
         merchantId: merchantAId,
         exceptionId: 'EXC-TEST-1',
+        primaryEntityType: 'PAYMENT', primaryEntityId: paymentAId,
         type: 'ORDER_PAYMENT_MISMATCH',
         severity: 'HIGH',
         status: 'OPEN',
@@ -134,23 +142,10 @@ describe('Security (e2e)', () => {
       });
     
     expect(response.status).toBe(400);
+    expect(response.body.message).toMatch(/unreserved captured balance/);
   });
 
-  it.skip('4. Login rate limiting', async () => {
-    // 5 failed logins should be allowed by rate limiter
-    for (let i = 0; i < 5; i++) {
-      await request(app.getHttpServer())
-        .post('/auth/login')
-        .send({ email: 'adminA@test.com', password: 'wrong' });
-    }
-    
-    // 6th attempt should be rate limited (429)
-    const response = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: 'adminA@test.com', password: 'wrong' });
-      
-    expect(response.status).toBe(429);
-  });
+  // Real rate-limiter HTTP coverage is in scripts/verify-http.mjs (no Jest module shim).
 
   it('5. Webhook freshness (created_at older than the freshness window is rejected)', async () => {
     // Razorpay signs the raw body and sends no timestamp header, so staleness

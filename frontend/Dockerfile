@@ -1,47 +1,25 @@
-# Stage 1: Install dependencies
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-
-COPY package*.json ./
+COPY package.json package-lock.json .npmrc ./
+COPY backend/package.json ./backend/package.json
+COPY frontend/package.json ./frontend/package.json
+COPY backend/prisma ./backend/prisma
 RUN npm ci
+COPY frontend ./frontend
+ARG NEXT_PUBLIC_API_URL=/api
+ARG API_UPSTREAM_URL=http://backend:3001/api/v1
+ENV NODE_OPTIONS=--max-old-space-size=768
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} API_UPSTREAM_URL=${API_UPSTREAM_URL} NEXT_TELEMETRY_DISABLED=1
+RUN npm run build -w frontend
 
-# Stage 2: Build application
-FROM node:20-alpine AS builder
+FROM node:22-alpine
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-# Pass build-time environment variables for Next.js public variables
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001/api/v1}
-ARG NEXT_PUBLIC_AI_MODEL
-ENV NEXT_PUBLIC_AI_MODEL=${NEXT_PUBLIC_AI_MODEL:-llama-3.3-70b-versatile}
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-
-RUN npm run build
-
-# Stage 3: Production runner
-FROM node:20-alpine AS runner
-WORKDIR /app
-
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
-
-# Copy public static files and standalone output
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./frontend/public
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./frontend/.next/static
 USER nextjs
-
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
 EXPOSE 3000
-
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1
-
-CMD ["node", "server.js"]
+CMD ["node", "frontend/server.js"]

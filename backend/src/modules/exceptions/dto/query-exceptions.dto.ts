@@ -1,9 +1,13 @@
-import { IsOptional, IsEnum, IsInt, Min } from 'class-validator';
+import { IsOptional, IsEnum, IsInt, Min, Max, IsString, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ExceptionType, Severity, ExceptionStatus } from '@prisma/client';
 
 export class QueryExceptionsDto {
+    @IsOptional()
+    @IsString()
+    @MaxLength(200)
+    search?: string;
     @ApiPropertyOptional({ enum: ExceptionType, description: 'Filter by exception type' })
     @IsOptional()
     @IsEnum(ExceptionType)
@@ -31,5 +35,6 @@ export class QueryExceptionsDto {
     @Type(() => Number)
     @IsInt()
     @Min(1)
+    @Max(100)
     limit?: number = 10;
 }

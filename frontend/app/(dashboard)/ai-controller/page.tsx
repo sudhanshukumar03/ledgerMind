@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { aiApi, actionsApi, AiProposal, ChatMessage, ChatResponse } from '../../../lib/api-client';
 import { C } from '../../../lib/tokens';
 import { humanizeKey, formatValue } from '../../../lib/humanize';
+import { formatPaise } from '../../../lib/utils';
 import { Bot, User, Send, Loader2, Zap, ShieldAlert, FileText, XCircle, ArrowRight, Activity, Info, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface Message {
@@ -37,7 +38,7 @@ const PROPOSAL_LABELS: Record<AiProposal['action_type'], string> = {
 };
 
 const inr = (paise?: number) =>
-  paise === undefined ? '' : `₹${(paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  paise === undefined ? '' : formatPaise(String(paise));
 
 /**
  * Renders one AI-proposed action as a submit button that pushes the proposal
@@ -99,7 +100,7 @@ function ProposalCard({ proposal }: { proposal: AiProposal }) {
           disabled={!submittable || state === 'submitting'}
           title={submittable ? undefined : 'No linked exception — cannot submit'}
           className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold border rounded-md shrink-0 disabled:opacity-50 transition-colors"
-          style={{ backgroundColor: C.primaryTint, borderColor: `${C.primary}40`, color: C.primary }}
+          style={{ backgroundColor: C.primaryTint, borderColor: `color-mix(in srgb, ${C.primary} 25%, transparent)`, color: C.primary }}
         >
           {state === 'submitting' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRight className="w-3.5 h-3.5" />}
           {state === 'submitting' ? 'Submitting…' : 'Submit for approval'}
@@ -166,7 +167,7 @@ function AssistantBubble({ msg }: { msg: Message }) {
                     <span
                       key={i}
                       className="px-2.5 py-1 text-[11px] font-semibold border rounded-md"
-                      style={{ backgroundColor: C.primaryTint, borderColor: `${C.primary}40`, color: C.primary }}
+                      style={{ backgroundColor: C.primaryTint, borderColor: `color-mix(in srgb, ${C.primary} 25%, transparent)`, color: C.primary }}
                     >
                       {a}
                     </span>
@@ -223,11 +224,11 @@ export default function AiControllerPage() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [aiModel, setAiModel] = useState<string>('Unknown Model');
-  const [toolCount, setToolCount] = useState<number>(0);
+  const [toolCount, setToolCount] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    aiApi.getConfig().then(res => { setAiModel(res.data.model); setToolCount(res.data.toolCount ?? 0); }).catch(() => {});
+    aiApi.getConfig().then(res => { setAiModel(res.data.model); setToolCount(res.data.toolCount ?? null); }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -284,7 +285,7 @@ export default function AiControllerPage() {
             <h1 className="text-[16px] font-bold" style={{ color: C.textPrimary }}>AI Finance Controller</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: C.success }} />
-              <span className="text-[12px]" style={{ color: C.textSecondary }}>{aiModel} · Live data · {toolCount || 14} tools available</span>
+              <span className="text-[12px]" style={{ color: C.textSecondary }}>{aiModel} · Live data · {toolCount === null ? 'Tool count unavailable' : `${toolCount} tools available`}</span>
             </div>
           </div>
         </div>
@@ -359,8 +360,9 @@ export default function AiControllerPage() {
       {/* Input bar */}
       <div className="shrink-0 px-8 py-5 border-t" style={{ backgroundColor: C.surface, borderColor: C.border }}>
         <div className="max-w-4xl mx-auto flex flex-col gap-2">
-          <div className="relative flex items-end gap-3 rounded-xl border p-2 focus-within:ring-2 transition-shadow" style={{ borderColor: C.border, backgroundColor: C.bg, '--tw-ring-color': `${C.primary}40` } as React.CSSProperties}>
+          <div className="relative flex items-end gap-3 rounded-xl border p-2 focus-within:ring-2 transition-shadow" style={{ borderColor: C.border, backgroundColor: C.bg, '--tw-ring-color': `color-mix(in srgb, ${C.primary} 25%, transparent)` } as React.CSSProperties}>
             <textarea
+                maxLength={8000}
               id="ai-chat-input"
               rows={1}
               value={input}
