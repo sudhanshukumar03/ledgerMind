@@ -41,13 +41,15 @@ The first pushed baseline, ae9bff1, triggered [run 40027237587](https://github.c
 
 The follow-up installs all workspaces at the root, resolves shared checks through their owning workspace, gives application lifecycle hooks 30 seconds, and removes --forceExit. Request/assertion timeouts remain unchanged. Docker Hub credentials are still required in repository secrets.
 
+Commit 0eb8f0b passed all five jobs in [run 40111598982](https://github.com/sudhanshukumar03/ledgerMind/actions/runs/40111598982): backend units and offline checks, backend database/HTTP acceptance, both browser prefixes, and isolated container smoke. This is the hosted acceptance result for the refreshed lockfile.
+
 ### Fresh-install follow-up - 24 October 2026
 
 Before the later dependency refresh, a new isolated local run passed 174 units, 11 HTTP E2E cases, all 19 SQL/Redis scenarios, R1-R6, all 15 R8 schedules, and five Q1-Q5 groups. Task-owned services were removed. Its first browser invocation selected the wrong configuration, and native HTTP cold startup exceeded the old harness grace; neither was counted as a pass.
 
 After the four dependency patches described in [dependency maintenance](testing.md#dependency-maintenance), a clean strict-peer npm ci and Prisma generation passed. The resolved dependency tree was valid and the full audit reported zero vulnerabilities. Against that exact install, both TypeScript checks, 174 units, backend build, both frontend builds, offline contracts/tooling, and all 28 production-browser cases passed with one worker and zero retries. Logs are retained under ignored .runtime/recheck-20261024/final.
 
-The local Linux image compiled successfully but failed during Docker export/unpack as the host encountered memory/paging pressure. Docker then became unavailable; other applications were not restarted. Container and database acceptance against the refreshed lockfile must be established by the follow-up hosted run before attributing those baseline results to it.
+The local Linux image compiled successfully but failed during Docker export/unpack as the host encountered memory/paging pressure. Docker then became unavailable; other applications were not restarted. The hosted follow-up independently completed clean Linux builds and container startup/proxy/restart preservation with zero install audit findings. It also passed 11 HTTP E2E cases with graceful teardown, all 19 SQL/Redis scenarios, R1-R6, all 15 R8 schedules, five Q1-Q5 groups, and native HTTP boundaries against the refreshed lockfile. Both hosted browser prefixes passed all 14 cases without retries.
 
 ## Per-finding closure
 
