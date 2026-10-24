@@ -105,12 +105,12 @@ describe('Security (e2e)', () => {
       },
     });
     exceptionAId = exceptionA.id;
-  });
+  }, 30000); // Bound real app/database fixture initialization separately.
 
   afterAll(async () => {
-    await prisma.$disconnect();
-    await app.close();
-  });
+    // Let Nest close its resources; do not disconnect Prisma while workers run.
+    if (app) await app.close();
+  }, 30000);
 
   it('1. Unauthenticated access returns 401 Unauthorized', async () => {
     const response = await request(app.getHttpServer()).get('/exceptions');

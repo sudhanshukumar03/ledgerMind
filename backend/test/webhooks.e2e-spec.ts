@@ -42,11 +42,11 @@ describe('Webhooks (e2e)', () => {
     await app.init();
     prisma = app.get(PrismaService);
     await prisma.webhookEvent.deleteMany();
-  });
+  }, 30000); // App bootstrap includes real database/queue connections.
 
   afterAll(async () => {
-    await app.close();
-  });
+    if (app) await app.close();
+  }, 30000); // BullMQ drains blocking reads; request assertions keep 5s.
 
   it('rejects (HTTP 200, reason: invalid_signature) on a bad signature', async () => {
     const payload = JSON.stringify({ event: 'payment.captured', event_id: 'evt_1' });

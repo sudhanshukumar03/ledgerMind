@@ -1,12 +1,12 @@
 # Fix verification record
 
-Latest full application verification: **24 October 2026**. This record covers the documented cases for 58 original findings, R1-R11, and Q1-Q6. ID 44 was withdrawn and is not an application fix. Documentation restructuring on the same date did not rerun the application suites.
+Latest full application verification: **24 October 2026**. This record covers the documented cases for 58 original findings, R1-R11, and Q1-Q6. ID 44 was withdrawn and is not an application fix. The later fresh-install and hosted-CI follow-up is recorded separately below so earlier evidence is not attributed to a newer lockfile.
 
 Start with [completed checks](#completed-checks), then use the [original finding matrix](#per-finding-closure), [R1-R11](#r1-r11-review-and-closure), or [Q1-Q6](#q1-q6-quality-review-and-closure) for the relevant case. The [testing guide](testing.md) describes repeatable commands; the [historical audit](full-code-audit-2026-10-21.md) preserves pre-fix observations.
 
 ## Completed checks
 
-The codes in this table identify evidence used by the closure matrices below.
+The codes in this table identify evidence from the completed baseline run used by the closure matrices below.
 
 | Code | Completed result | Scope |
 | --- | --- | --- |
@@ -35,9 +35,19 @@ The disposable run is retained under ignored .runtime/quality-fix-20261023/3e2de
 
 ## CI configuration
 
-GitHub Actions is configured for backend units, guarded HTTP E2E, Q1-Q5 after backend build, and production browser builds/tests for both API prefixes. It also runs offline contracts, tooling, and documentation checks. PostgreSQL readiness checks use TCP availability.
+GitHub Actions runs backend units, offline contracts/tooling/docs, guarded HTTP E2E, Q1-Q5, R1-R6, R8, SQL/Redis invariants, native HTTP, both production browser prefixes, and a separate container startup/proxy/restart smoke. PostgreSQL readiness checks use TCP availability. Every workspace job installs from the root lockfile; browser matrix failures do not cancel the other prefix.
 
-Hosted CI was configured but not triggered during this work. Docker Hub credentials used by the workflow must be available in repository secrets. Local passing checks are not a substitute for an actual hosted run.
+The first pushed baseline, ae9bff1, triggered [run 40027237587](https://github.com/sudhanshukumar03/ledgerMind/actions/runs/40027237587). Units and 14 /api browser cases passed, but CI failed: cross-workspace offline checks could not resolve TypeScript after a frontend-only install, and five-second E2E lifecycle hooks expired during worker shutdown and subsequent setup. The /api/v1 matrix job was cancelled. This was not a passing hosted run.
+
+The follow-up installs all workspaces at the root, resolves shared checks through their owning workspace, gives application lifecycle hooks 30 seconds, and removes --forceExit. Request/assertion timeouts remain unchanged. Docker Hub credentials are still required in repository secrets.
+
+### Fresh-install follow-up - 24 October 2026
+
+Before the later dependency refresh, a new isolated local run passed 174 units, 11 HTTP E2E cases, all 19 SQL/Redis scenarios, R1-R6, all 15 R8 schedules, and five Q1-Q5 groups. Task-owned services were removed. Its first browser invocation selected the wrong configuration, and native HTTP cold startup exceeded the old harness grace; neither was counted as a pass.
+
+After the four dependency patches described in [dependency maintenance](testing.md#dependency-maintenance), a clean strict-peer npm ci and Prisma generation passed. The resolved dependency tree was valid and the full audit reported zero vulnerabilities. Against that exact install, both TypeScript checks, 174 units, backend build, both frontend builds, offline contracts/tooling, and all 28 production-browser cases passed with one worker and zero retries. Logs are retained under ignored .runtime/recheck-20261024/final.
+
+The local Linux image compiled successfully but failed during Docker export/unpack as the host encountered memory/paging pressure. Docker then became unavailable; other applications were not restarted. Container and database acceptance against the refreshed lockfile must be established by the follow-up hosted run before attributing those baseline results to it.
 
 ## Per-finding closure
 
@@ -180,6 +190,6 @@ Subsequent schema/preservation rechecks were read-only on the normal database; d
 
 Passing these cases establishes their observed outcomes. Unit mocks do not prove every database interleaving, browser interception does not prove external delivery, and provider connectivity does not prove financial reconciliation correctness.
 
-Earlier runs used smaller test totals as cases were added. Intermediate worker/engine/memory/teardown failures were not counted as passing checks; final successful results above are the authoritative summary. No assertions or timeouts were weakened to claim closure.
+Earlier runs used smaller test totals as cases were added. Intermediate worker/engine/memory/teardown failures were not counted as passing checks. Application lifecycle and cold-start budgets were increased in the CI follow-up as recorded above; request/assertion deadlines and acceptance assertions were retained.
 
 Optional learning work is tracked in [TODO.md](../../TODO.md).

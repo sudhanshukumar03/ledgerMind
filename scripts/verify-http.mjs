@@ -86,8 +86,9 @@ async function request(path, method = 'GET', data, token, headers = {}) {
 }
 try {
   let ready = false;
-  for (let n = 0; n < 100; n++) {
-    if (child.exitCode !== null)
+  const startupDeadline = Date.now() + 30000;
+  while (Date.now() < startupDeadline) {
+    if (child.exitCode !== null || child.signalCode !== null)
       throw new Error(`API failed to start: ${logs}`);
     try {
       if ((await request('/health')).ok) {
@@ -97,7 +98,7 @@ try {
     } catch {}
     await new Promise((r) => setTimeout(r, 100));
   }
-  assert.equal(ready, true, logs);
+  assert.ok(ready, `API did not become ready within 30 seconds. ${logs}`);
   assert.equal((await request('/exceptions')).status, 401);
   const financialCounts = () =>
     prisma.$transaction([

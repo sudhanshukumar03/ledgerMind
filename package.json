@@ -23,6 +23,9 @@
     "verify:providers": "node scripts/project-node.cjs scripts/verify-providers.mjs"
   },
   "overrides": {
+    "@nestjs/platform-express": {
+      "multer": "2.5.0"
+    },
     "proxy-addr": "^2.0.8",
     "@istanbuljs/load-nyc-config": {
       "js-yaml": "^4.1.1",

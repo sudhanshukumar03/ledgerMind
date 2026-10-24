@@ -33,7 +33,7 @@ Use a new disposable PostgreSQL database on loopback and a separate Redis instan
 | AI_ENABLED | false |
 | PAYMENT_EXECUTION_MODE | disabled, with provider methods stubbed where a suite exercises actions. |
 | REDIS_HOST / REDIS_PORT | The isolated test instance. |
-| TEST_REDIS_PORT | The dedicated Redis port used by verify-fixes.mjs. The documented combined run uses 56383, which verify-http.mjs also expects. Unlike the database guard, this variable does not itself prove Redis isolation. |
+| TEST_REDIS_PORT | Set to 56383 for verify-fixes.mjs; it rejects other ports. verify-http.mjs also expects 56383. Provision a separate Redis instance there; the port check alone does not prove isolation. |
 
 Provision the current Prisma schema on that disposable target and build the backend before running compiled-service checks. The guard runs before destructive E2E fixtures import. The operator owns database/Redis creation and teardown; these commands do not provision a safe target automatically.
 
@@ -47,6 +47,8 @@ Provision the current Prisma schema on that disposable target and build the back
 | npm run node -- scripts/verify-http.mjs | Real compiled API/throttler, selected infrastructure configuration, authentication, fallback audit, and malformed webhook boundaries. |
 
 verify-http.mjs uses Redis port 56383 and API port 3108; keep them available for the isolated run. The Jest HTTP suites use a compatibility shim for one ESM/CJS throttler import, while native HTTP checks exercise the real module. These are complementary checks.
+
+Jest application initialization and shutdown hooks have a 30-second budget for database setup and BullMQ worker draining. Individual assertions retain their default five-second timeout. CI uses graceful shutdown without --forceExit. The native HTTP harness allows 30 seconds for cold startup and keeps five-second request deadlines.
 
 ## Container packaging
 
@@ -70,7 +72,7 @@ frontend/e2e uses synthetic intercepted API responses. Tests require visible fix
 npm run npm -- run test:e2e -w frontend -- --workers=1 --retries=0
 ```
 
-Playwright normally starts the frontend development server. For an existing production server, set PLAYWRIGHT_BASE_URL and PLAYWRIGHT_EXTERNAL_SERVER=true; set PLAYWRIGHT_CHANNEL=msedge when using installed Edge. CI prepares a standalone production server after building. The configuration defaults to two retries in CI and zero locally; the explicit --retries=0 above reproduces the recorded no-retry acceptance setting.
+Playwright normally starts the frontend development server. For an existing production server, set PLAYWRIGHT_BASE_URL and PLAYWRIGHT_EXTERNAL_SERVER=true; set PLAYWRIGHT_CHANNEL=msedge when using installed Edge. CI prepares a standalone production server after building. The configuration defaults to two retries in CI and zero locally; the workflow explicitly selects one worker and zero retries, matching the command above.
 
 Build/test with NEXT_PUBLIC_API_URL=/api and again with /api/v1 to verify fixture normalization. This matrix checks intercepted browser requests; the container smoke separately verifies the real canonical /api-to-/api/v1 proxy.
 
@@ -111,14 +113,17 @@ npm run npm -- audit --audit-level=low
 npm run node -- scripts/verify-tooling.cjs
 ```
 
-Two dependency corrections are recorded as of 24 October 2026:
+Dependency corrections recorded on 24 October 2026:
 
 - The root owns @istanbuljs/load-nyc-config 1.1.0 and scopes js-yaml ^4.1.1 to that loader. The lock selects js-yaml 4.3.2 and argparse 2.0.1, removing the sprintf-js chain without downgrading Jest/ts-jest or suppressing advisories.
 - The frontend pins Next.js 16.4.1 after 16.4.0 was flagged during verification. Both prefix builds/browser suites and clean Docker builds passed with the updated lockfile. The full audit at that time reported zero vulnerabilities; this is a dated result, not a claim about future advisories.
+- A later registry audit identified new advisories. The lockfile now selects body-parser 2.4.0, fast-uri 3.1.9, multer 2.5.0, and Zod 4.6.7. A root override scopes multer to @nestjs/platform-express, whose published version still pins 2.4.0; the backend Zod minimum is ^4.6.7. NestJS and Express versions were retained. A fresh strict-peer install, dependency-tree validation, unit/build/browser checks, and full audit passed with these selections; the audit reported zero vulnerabilities.
 
 verify-tooling.cjs resolves the actual Babel coverage loader, checks the selected YAML major and absent vulnerable chain, and exercises YAML inheritance/options. Installation or audit alone is insufficient evidence of tooling compatibility. The loader uses yaml.load; see its [published source](https://github.com/istanbuljs/load-nyc-config/blob/v1.1.0/index.js) and the [YAML migration guide](https://github.com/nodeca/js-yaml/blob/4.1.0/migrate_v3_to_v4.md).
 
 The Next.js maintainer advisories are [typed-array cache RCE](https://github.com/vercel/next.js/security/advisories/GHSA-673q-mjm6-r5xr), [SVG optimization RCE](https://github.com/vercel/next.js/security/advisories/GHSA-2464-fhr4-w9xw), and [Server Action denial of service](https://github.com/vercel/next.js/security/advisories/GHSA-p3m5-59mp-jv5r). Recording the dependency update does not establish that every exploit prerequisite existed in this application.
+
+The later advisories cover resource exhaustion in [body-parser](https://github.com/expressjs/body-parser/security/advisories/GHSA-27r3-jxmh-p828), [multer](https://github.com/expressjs/multer/security/advisories/GHSA-q7qp-rjg7-q26m), [fast-uri](https://github.com/advisories/GHSA-w74x-v6f9-j3xg), and [Zod](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5). Audit results are dated observations; check again when dependencies or advisory data change.
 
 ## Documentation maintenance
 

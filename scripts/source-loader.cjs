@@ -4,7 +4,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const root = path.resolve(__dirname, '..');
-const ts = require('typescript');
+// Resolve the declared backend compiler instead of relying on npm hoisting it
+// into the monorepo root (frontend and backend use different TS versions).
+const ts = createRequire(path.join(root, 'backend/package.json'))('typescript');
 function source(file, stubs = {}, globals = {}) {
   const filename = path.resolve(root, file), localRequire = createRequire(filename);
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { fileName: filename, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, experimentalDecorators: true, emitDecoratorMetadata: false, esModuleInterop: true } }).outputText;

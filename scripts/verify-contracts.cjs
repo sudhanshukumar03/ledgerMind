@@ -1,6 +1,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
 const { source } = require('./source-loader.cjs');
+const frontendRequire = createRequire(path.resolve(__dirname, '../frontend/package.json'));
 async function main() {
   const { TransactionsService } = source('backend/src/modules/transactions/transactions.service.ts');
   const service = new TransactionsService({});
@@ -11,7 +14,7 @@ async function main() {
   assert.equal(isMoney('refundCount', 400), false);
   assert.equal(formatValue('amount', '9007199254740993'), '\u20b99,00,71,99,25,47,409.93');
   const { Amount } = source('frontend/components/ui/Amount.tsx');
-  const { renderToStaticMarkup } = require('react-dom/server');
+  const { renderToStaticMarkup } = frontendRequire('react-dom/server');
   assert.ok(renderToStaticMarkup(Amount({ value: '9007199254740993' })).includes('\u20b99,00,71,99,25,47,409.93'));
   assert.ok(!renderToStaticMarkup(Amount({ value: Number.MAX_SAFE_INTEGER + 1 })).includes('\u20b9'));
   const payloads = [];
